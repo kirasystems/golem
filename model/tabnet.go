@@ -1,19 +1,20 @@
-// Package tabnet is an implementation of:
-// "Model: Attentive Interpretable Tabular Learning" - https://arxiv.org/abs/1908.07442
-package tabnet
+package model
 
 import (
+	"math"
+
 	"github.com/nlpodyssey/spago/pkg/mat"
+	"github.com/nlpodyssey/spago/pkg/mat/rand"
 	"github.com/nlpodyssey/spago/pkg/ml/ag"
+	"github.com/nlpodyssey/spago/pkg/ml/initializers"
 	"github.com/nlpodyssey/spago/pkg/ml/nn"
 	"github.com/nlpodyssey/spago/pkg/ml/nn/linear"
 	"github.com/nlpodyssey/spago/pkg/ml/nn/normalization/batchnorm"
-	"math"
 )
 
 var (
-	_ nn.Model     = &Model{}
-	_ nn.Processor = &Processor{}
+	_ nn.Model     = &TabNet{}
+	_ nn.Processor = &TabNetProcessor{}
 	_ nn.Processor = &FeatureTransformerProcessor{}
 	_ nn.Processor = &FeatureTransformerBlockProcessor{}
 	_ nn.Model     = &FeatureTransformer{}
@@ -24,10 +25,10 @@ var SquareRootHalf = math.Sqrt(0.5)
 
 func glu(g *ag.Graph, dim int, x ag.Node) ag.Node {
 	half := dim / 2
-	value := g.View(x, 0, 0, 0, half)
-	gate := g.View(x, 0, half, 0, dim)
+	value := g.View(x, 0, 0, half, 1)
+	gate := g.View(x, half, 0, half, 1)
 
-	return g.Mul(value, g.Sigmoid(gate))
+	return g.Prod(value, g.Sigmoid(gate))
 }
 
 type FeatureTransformer struct {
@@ -44,10 +45,11 @@ type FeatureTransformerProcessor struct {
 }
 
 func (f *FeatureTransformerProcessor) Forward(xs ...ag.Node) []ag.Node {
-	transformedInput := f.batchNormProcessor.Forward(f.denseLayerProcessor.Forward(xs...)...)
+	transformedInput := f.denseLayerProcessor.Forward(xs...)
+	transformedInput = f.batchNormProcessor.Forward(transformedInput...)
 	out := make([]ag.Node, len(xs))
 	for i := range out {
-		out[i] = glu(f.Graph, f.inputDimension, transformedInput[i])
+		out[i] = glu(f.Graph, 2*f.inputDimension, transformedInput[i])
 	}
 	return out
 }
@@ -64,6 +66,16 @@ func (f *FeatureTransformer) NewProc(g *ag.Graph) nn.Processor {
 		denseLayerProcessor: f.DenseLayer.NewProc(g),
 		batchNormProcessor:  f.BatchNormLayer.NewProc(g),
 	}
+}
+
+func (f *FeatureTransformerProcessor) SetMode(mode nn.ProcessingMode) {
+	f.Mode = mode
+	f.denseLayerProcessor.SetMode(mode)
+	f.batchNormProcessor.SetMode(mode)
+}
+
+func (f *FeatureTransformer) Init(generator *rand.LockedRand) {
+	initializers.XavierUniform(f.DenseLayer.W.Value(), initializers.Gain(ag.OpSigmoid), generator)
 }
 
 type FeatureTransformerBlock struct {
@@ -108,29 +120,39 @@ func (f *FeatureTransformerBlock) NewProc(g *ag.Graph) nn.Processor {
 		layer2Processor: f.Layer2.NewProc(g),
 	}
 }
+func (f *FeatureTransformerBlockProcessor) SetMode(mode nn.ProcessingMode) {
+	f.Mode = mode
+	f.layer1Processor.SetMode(mode)
+	f.layer2Processor.SetMode(mode)
+}
 func (f *FeatureTransformerBlock) NewProcNoResidual(g *ag.Graph) nn.Processor {
 	out := f.NewProc(g)
 	out.(*FeatureTransformerBlockProcessor).skipResidualInput = true
 	return out
 }
 
-func NewFeatureTransformerBlock(featureDimension int) *FeatureTransformerBlock {
-
+func (f *FeatureTransformerBlock) Init(generator *rand.LockedRand) {
+	f.Layer1.Init(generator)
+	f.Layer2.Init(generator)
+}
+func NewFeatureTransformerBlock(featureDimension int, batchMomentum float64) *FeatureTransformerBlock {
 	return &FeatureTransformerBlock{
 		Layer1: &FeatureTransformer{
 			InputDimension: featureDimension,
 			DenseLayer:     linear.New(featureDimension, 2*featureDimension),
-			BatchNormLayer: batchnorm.New(featureDimension),
+			BatchNormLayer: batchnorm.NewWithMomentum(2*featureDimension, batchMomentum),
 		},
 		Layer2: &FeatureTransformer{
 			InputDimension: featureDimension,
 			DenseLayer:     linear.New(featureDimension, 2*featureDimension),
-			BatchNormLayer: batchnorm.New(featureDimension),
+			BatchNormLayer: batchnorm.NewWithMomentum(2*featureDimension, batchMomentum),
 		},
 	}
 }
 
-type Model struct {
+//  TabNet is an implementation of:
+// "TabNet: Attentive Interpretable Tabular Learning" - https://arxiv.org/abs/1908.07442
+type TabNet struct {
 	NumDecisionSteps int
 	NumColumns       int
 	FeatureDimension int
@@ -138,7 +160,6 @@ type Model struct {
 	RelaxationFactor float64
 	BatchMomentum    float64
 	VirtualBatchSize int
-	Epsilon          float64
 
 	FeatureBatchNorm         *batchnorm.Model
 	SharedFeatureTransformer *FeatureTransformerBlock
@@ -149,35 +170,45 @@ type Model struct {
 	OutputLayer          *linear.Model
 }
 
-func NewModel(numDecisionSteps int, numColumns int, featureDimension int, outputDimension int,
-	relaxationFactor float64, batchMomentum float64, virtualBatchSize int, epsilon float64) *Model {
+const Epsilon = 0.00001
 
-	stepFeatureTransformers := make([]*FeatureTransformerBlock, numDecisionSteps)
+type TabNetParameters struct {
+	NumDecisionSteps int
+	NumColumns       int
+	FeatureDimension int
+	OutputDimension  int
+	RelaxationFactor float64
+	BatchMomentum    float64
+	VirtualBatchSize int
+}
+
+func NewTabNet(p TabNetParameters) *TabNet {
+
+	stepFeatureTransformers := make([]*FeatureTransformerBlock, p.NumDecisionSteps)
 	for i := range stepFeatureTransformers {
-		stepFeatureTransformers[i] = NewFeatureTransformerBlock(featureDimension)
+		stepFeatureTransformers[i] = NewFeatureTransformerBlock(p.FeatureDimension, p.BatchMomentum)
 	}
 
-	return &Model{NumDecisionSteps: numDecisionSteps,
-		NumColumns:       numColumns,
-		FeatureDimension: featureDimension,
-		OutputDimension:  outputDimension,
-		RelaxationFactor: relaxationFactor,
-		BatchMomentum:    batchMomentum,
-		VirtualBatchSize: virtualBatchSize,
-		Epsilon:          epsilon,
+	return &TabNet{NumDecisionSteps: p.NumDecisionSteps,
+		NumColumns:       p.NumColumns,
+		FeatureDimension: p.FeatureDimension,
+		OutputDimension:  p.OutputDimension,
+		RelaxationFactor: p.RelaxationFactor,
+		BatchMomentum:    p.BatchMomentum,
+		VirtualBatchSize: p.VirtualBatchSize,
 
-		FeatureBatchNorm:         batchnorm.New(numColumns),
-		SharedFeatureTransformer: NewFeatureTransformerBlock(featureDimension),
+		FeatureBatchNorm:         batchnorm.NewWithMomentum(p.NumColumns, p.BatchMomentum),
+		SharedFeatureTransformer: NewFeatureTransformerBlock(p.FeatureDimension, p.BatchMomentum),
 		StepFeatureTransformers:  stepFeatureTransformers,
-		AttentionTransformer:     linear.New(featureDimension, numColumns),
-		AttentionBatchNorm:       batchnorm.New(numColumns),
-		OutputLayer:              linear.New(featureDimension, outputDimension),
+		AttentionTransformer:     linear.New(p.FeatureDimension, p.NumColumns),
+		AttentionBatchNorm:       batchnorm.NewWithMomentum(p.NumColumns, p.BatchMomentum),
+		OutputLayer:              linear.New(p.FeatureDimension, p.OutputDimension),
 	}
 }
 
-type Processor struct {
+type TabNetProcessor struct {
 	nn.BaseProcessor
-	model                         *Model
+	model                         *TabNet
 	featureBatchNormProcessor     nn.Processor
 	sharedTransformerProcessor    nn.Processor
 	stepTransformerProcessors     []nn.Processor
@@ -185,16 +216,16 @@ type Processor struct {
 	attentionBatchNormProcessor   nn.Processor
 	outputProcessor               nn.Processor
 
-	attentionEntropy []ag.Node // computed by forward
+	AttentionEntropy []ag.Node // computed by forward
 }
 
-func (m *Model) NewProc(g *ag.Graph) nn.Processor {
+func (m *TabNet) NewProc(g *ag.Graph) nn.Processor {
 
 	stepTransformerProcessors := make([]nn.Processor, m.NumDecisionSteps)
 	for i := range stepTransformerProcessors {
 		stepTransformerProcessors[i] = m.StepFeatureTransformers[i].NewProc(g)
 	}
-	return &Processor{
+	return &TabNetProcessor{
 		BaseProcessor: nn.BaseProcessor{
 			Model:             m,
 			Mode:              nn.Training,
@@ -211,7 +242,17 @@ func (m *Model) NewProc(g *ag.Graph) nn.Processor {
 	}
 }
 
-func (p Processor) Forward(xs ...ag.Node) []ag.Node {
+func (p *TabNetProcessor) SetMode(mode nn.ProcessingMode) {
+	p.Mode = mode
+	p.featureBatchNormProcessor.SetMode(mode)
+	p.sharedTransformerProcessor.SetMode(mode)
+	nn.SetProcessingMode(mode, p.stepTransformerProcessors...)
+	p.outputProcessor.SetMode(mode)
+	p.attentionTransformerProcessor.SetMode(mode)
+	p.attentionBatchNormProcessor.SetMode(mode)
+
+}
+func (p *TabNetProcessor) Forward(xs ...ag.Node) []ag.Node {
 	g := p.Graph
 
 	input := p.featureBatchNormProcessor.Forward(xs...)
@@ -226,9 +267,9 @@ func (p Processor) Forward(xs ...ag.Node) []ag.Node {
 		complementaryAggregatedMaskValues[i] = g.NewVariable(mat.NewInitVecDense(p.model.NumColumns, 1.0), true)
 	}
 
-	p.attentionEntropy = make([]ag.Node, len(xs))
+	p.AttentionEntropy = make([]ag.Node, len(xs))
 	for i := range xs {
-		p.attentionEntropy[i] = g.NewVariable(mat.NewScalar(0.0), true)
+		p.AttentionEntropy[i] = g.NewVariable(mat.NewScalar(0.0), true)
 	}
 
 	//TODO: use_bias=false? (linear)
@@ -247,17 +288,27 @@ func (p Processor) Forward(xs ...ag.Node) []ag.Node {
 		if i < p.model.NumDecisionSteps-1 {
 			mask := p.attentionBatchNormProcessor.Forward(p.attentionTransformerProcessor.Forward(transformed...)...)
 			for i := range mask {
-				mask[i] = g.Mul(mask[i], complementaryAggregatedMaskValues[i])
+				mask[i] = g.Prod(mask[i], complementaryAggregatedMaskValues[i])
 				mask[i] = g.SparseMax(mask[i])
-				complementaryAggregatedMaskValues[i] = g.Mul(complementaryAggregatedMaskValues[i],
-					g.Sub(g.Constant(p.model.RelaxationFactor), mask[i]))
-				input[i] = g.Mul(input[i], mask[i])
-				p.attentionEntropy[i] = g.Add(p.attentionEntropy[i],
-					g.ReduceSum(g.Mul(g.Neg(mask[i]), g.Log(g.Add(mask[i], g.Constant(p.model.Epsilon))))))
+				complementaryAggregatedMaskValues[i] = g.Prod(complementaryAggregatedMaskValues[i],
+					g.Neg(g.SubScalar(mask[i], g.Constant(p.model.RelaxationFactor))))
+				input[i] = g.Prod(input[i], mask[i])
+				p.AttentionEntropy[i] = g.Add(p.AttentionEntropy[i],
+					g.ReduceSum(g.Prod(g.Neg(mask[i]), g.Log(g.AddScalar(mask[i], g.Constant(Epsilon))))))
 			}
 
 		}
 	}
 
-	return outputAggregated
+	return p.outputProcessor.Forward(outputAggregated...)
+}
+
+func (m *TabNet) Init(generator *rand.LockedRand) {
+	m.SharedFeatureTransformer.Init(generator)
+	for _, t := range m.StepFeatureTransformers {
+		t.Init(generator)
+	}
+	gain := initializers.Gain(ag.OpIdentity)
+	initializers.XavierUniform(m.AttentionTransformer.W.Value(), gain, generator)
+	initializers.XavierUniform(m.OutputLayer.W.Value(), gain, generator)
 }
