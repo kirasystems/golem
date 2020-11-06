@@ -139,12 +139,12 @@ func NewFeatureTransformerBlock(featureDimension int, batchMomentum float64) *Fe
 	return &FeatureTransformerBlock{
 		Layer1: &FeatureTransformer{
 			InputDimension: featureDimension,
-			DenseLayer:     linear.NewNoBias(featureDimension, 2*featureDimension),
+			DenseLayer:     linear.New(featureDimension, 2*featureDimension, linear.Bias(false)),
 			BatchNormLayer: batchnorm.NewWithMomentum(2*featureDimension, batchMomentum),
 		},
 		Layer2: &FeatureTransformer{
 			InputDimension: featureDimension,
-			DenseLayer:     linear.NewNoBias(featureDimension, 2*featureDimension),
+			DenseLayer:     linear.New(featureDimension, 2*featureDimension, linear.Bias(false)),
 			BatchNormLayer: batchnorm.NewWithMomentum(2*featureDimension, batchMomentum),
 		},
 	}
@@ -203,9 +203,9 @@ func NewTabNet(p TabNetParameters) *TabNet {
 		FeatureBatchNorm:         batchnorm.NewWithMomentum(p.NumColumns, p.BatchMomentum),
 		SharedFeatureTransformer: NewFeatureTransformerBlock(p.FeatureDimension, p.BatchMomentum),
 		StepFeatureTransformers:  stepFeatureTransformers,
-		AttentionTransformer:     linear.NewNoBias(p.FeatureDimension, p.NumColumns),
+		AttentionTransformer:     linear.New(p.FeatureDimension, p.NumColumns, linear.Bias(false)),
 		AttentionBatchNorm:       batchnorm.NewWithMomentum(p.NumColumns, p.BatchMomentum),
-		OutputLayer:              linear.NewNoBias(p.FeatureDimension, p.OutputDimension),
+		OutputLayer:              linear.New(p.FeatureDimension, p.OutputDimension, linear.Bias(false)),
 	}
 }
 
