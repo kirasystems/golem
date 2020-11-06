@@ -139,12 +139,12 @@ func NewFeatureTransformerBlock(featureDimension int, batchMomentum float64) *Fe
 	return &FeatureTransformerBlock{
 		Layer1: &FeatureTransformer{
 			InputDimension: featureDimension,
-			DenseLayer:     linear.New(featureDimension, 2*featureDimension),
+			DenseLayer:     linear.NewNoBias(featureDimension, 2*featureDimension),
 			BatchNormLayer: batchnorm.NewWithMomentum(2*featureDimension, batchMomentum),
 		},
 		Layer2: &FeatureTransformer{
 			InputDimension: featureDimension,
-			DenseLayer:     linear.New(featureDimension, 2*featureDimension),
+			DenseLayer:     linear.NewNoBias(featureDimension, 2*featureDimension),
 			BatchNormLayer: batchnorm.NewWithMomentum(2*featureDimension, batchMomentum),
 		},
 	}
@@ -153,13 +153,14 @@ func NewFeatureTransformerBlock(featureDimension int, batchMomentum float64) *Fe
 //  TabNet is an implementation of:
 // "TabNet: Attentive Interpretable Tabular Learning" - https://arxiv.org/abs/1908.07442
 type TabNet struct {
-	NumDecisionSteps int
-	NumColumns       int
-	FeatureDimension int
-	OutputDimension  int
-	RelaxationFactor float64
-	BatchMomentum    float64
-	VirtualBatchSize int
+	NumDecisionSteps   int
+	NumColumns         int
+	FeatureDimension   int
+	OutputDimension    int
+	RelaxationFactor   float64
+	BatchMomentum      float64
+	VirtualBatchSize   int
+	SparsityLossWeight float64
 
 	FeatureBatchNorm         *batchnorm.Model
 	SharedFeatureTransformer *FeatureTransformerBlock
@@ -173,13 +174,14 @@ type TabNet struct {
 const Epsilon = 0.00001
 
 type TabNetParameters struct {
-	NumDecisionSteps int
-	NumColumns       int
-	FeatureDimension int
-	OutputDimension  int
-	RelaxationFactor float64
-	BatchMomentum    float64
-	VirtualBatchSize int
+	NumDecisionSteps   int
+	NumColumns         int
+	FeatureDimension   int
+	OutputDimension    int
+	RelaxationFactor   float64
+	BatchMomentum      float64
+	VirtualBatchSize   int
+	SparsityLossWeight float64
 }
 
 func NewTabNet(p TabNetParameters) *TabNet {
@@ -190,19 +192,20 @@ func NewTabNet(p TabNetParameters) *TabNet {
 	}
 
 	return &TabNet{NumDecisionSteps: p.NumDecisionSteps,
-		NumColumns:       p.NumColumns,
-		FeatureDimension: p.FeatureDimension,
-		OutputDimension:  p.OutputDimension,
-		RelaxationFactor: p.RelaxationFactor,
-		BatchMomentum:    p.BatchMomentum,
-		VirtualBatchSize: p.VirtualBatchSize,
+		NumColumns:         p.NumColumns,
+		FeatureDimension:   p.FeatureDimension,
+		OutputDimension:    p.OutputDimension,
+		RelaxationFactor:   p.RelaxationFactor,
+		BatchMomentum:      p.BatchMomentum,
+		VirtualBatchSize:   p.VirtualBatchSize,
+		SparsityLossWeight: p.SparsityLossWeight,
 
 		FeatureBatchNorm:         batchnorm.NewWithMomentum(p.NumColumns, p.BatchMomentum),
 		SharedFeatureTransformer: NewFeatureTransformerBlock(p.FeatureDimension, p.BatchMomentum),
 		StepFeatureTransformers:  stepFeatureTransformers,
-		AttentionTransformer:     linear.New(p.FeatureDimension, p.NumColumns),
+		AttentionTransformer:     linear.NewNoBias(p.FeatureDimension, p.NumColumns),
 		AttentionBatchNorm:       batchnorm.NewWithMomentum(p.NumColumns, p.BatchMomentum),
-		OutputLayer:              linear.New(p.FeatureDimension, p.OutputDimension),
+		OutputLayer:              linear.NewNoBias(p.FeatureDimension, p.OutputDimension),
 	}
 }
 
@@ -274,8 +277,16 @@ func (p *TabNetProcessor) Forward(xs ...ag.Node) []ag.Node {
 
 	//TODO: use_bias=false? (linear)
 
+	ones := g.NewVariable(input[0].Value().OnesLike(), false)
+
+	maskedFeatures := make([]ag.Node, len(input))
+	for i := range maskedFeatures {
+		//TODO: any better way of making a copy of input in a gradient-preserving way?
+		maskedFeatures[i] = g.Prod(input[i], ones)
+	}
+
 	for i := 0; i < p.model.NumDecisionSteps; i++ {
-		transformed := p.sharedTransformerProcessor.Forward(input...)
+		transformed := p.sharedTransformerProcessor.Forward(maskedFeatures...)
 		transformed = p.stepTransformerProcessors[i].Forward(transformed...)
 		if i > 0 {
 			decision := make([]ag.Node, len(xs))
@@ -292,9 +303,11 @@ func (p *TabNetProcessor) Forward(xs ...ag.Node) []ag.Node {
 				mask[i] = g.SparseMax(mask[i])
 				complementaryAggregatedMaskValues[i] = g.Prod(complementaryAggregatedMaskValues[i],
 					g.Neg(g.SubScalar(mask[i], g.Constant(p.model.RelaxationFactor))))
-				input[i] = g.Prod(input[i], mask[i])
+				maskedFeatures[i] = g.Prod(input[i], mask[i])
+				stepAttentionEntropy := g.ReduceSum(g.Prod(g.Neg(mask[i]), g.Log(g.AddScalar(mask[i], g.Constant(Epsilon)))))
+				stepAttentionEntropy = g.DivScalar(stepAttentionEntropy, g.Constant(float64(p.model.NumDecisionSteps-1)))
 				p.AttentionEntropy[i] = g.Add(p.AttentionEntropy[i],
-					g.ReduceSum(g.Prod(g.Neg(mask[i]), g.Log(g.AddScalar(mask[i], g.Constant(Epsilon))))))
+					stepAttentionEntropy)
 			}
 
 		}

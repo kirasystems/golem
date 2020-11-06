@@ -97,11 +97,10 @@ func (t *Trainer) trainBatch(batch *io.DataBatch) (float64, float64, float64) {
 	classificationLoss := g.NewVariable(mat.NewScalar(0), true)
 	sparsityLoss := g.NewVariable(mat.NewScalar(0), true)
 	for i := range batch.Targets {
-		const SparsityLossWeight = 0.0001
 		exampleCrossEntropy := losses.CrossEntropy(g, logits[i], int(batch.Targets[i]))
 		classificationLoss = g.Add(classificationLoss, exampleCrossEntropy)
 		sparsityLoss = g.Add(sparsityLoss, modelProc.AttentionEntropy[i])
-		exampleAttentionEntropy := g.Mul(modelProc.AttentionEntropy[i], g.Constant(SparsityLossWeight))
+		exampleAttentionEntropy := g.Mul(modelProc.AttentionEntropy[i], g.Constant(t.model.SparsityLossWeight))
 		exampleLoss := g.Add(exampleCrossEntropy, exampleAttentionEntropy)
 		loss = g.Add(loss, exampleLoss)
 	}

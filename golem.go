@@ -37,6 +37,7 @@ func TrainCommand() *cobra.Command {
 	cmd.Flags().Float64VarP(&modelParameters.RelaxationFactor, "relaxation-factor", "g", 1.5, "relaxation factor")
 	cmd.Flags().Float64VarP(&modelParameters.BatchMomentum, "batch-momentum", "", 0.9, "batch momentum")
 	cmd.Flags().StringVarP(&targetColumn, "target-column", "t", "", "target column")
+	cmd.Flags().Float64VarP(&modelParameters.SparsityLossWeight, "sparsity-loss-weight", "", 0.0001, "weight of the sparsity loss in total loss")
 
 	_ = cmd.MarkFlagRequired("train-file")
 	_ = cmd.MarkFlagRequired("output-file")
