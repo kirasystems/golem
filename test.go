@@ -5,13 +5,21 @@ import (
 	"golem/io"
 	"golem/model"
 	gio "io"
+	"sort"
 
 	"os"
 
 	"github.com/nlpodyssey/spago/pkg/mat/rand"
 	"github.com/nlpodyssey/spago/pkg/ml/ag"
 	"github.com/nlpodyssey/spago/pkg/ml/nn"
+	"github.com/nlpodyssey/spago/pkg/ml/stats"
 )
+
+type NoopWriter struct{}
+
+func (x NoopWriter) Write(p []byte) (n int, err error) {
+	return len(p), nil
+}
 
 func Test(modelFileName, inputFileName, outputFileName string) error {
 
@@ -39,8 +47,10 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 		defer outputFile.Close()
 		outputWriter = outputFile
 	} else {
-		outputWriter = os.Stdout
+		outputWriter = NoopWriter{}
 	}
+
+	metrics := make(map[string]*stats.ClassMetrics)
 
 	g := ag.NewGraph(ag.Rand(rand.NewLockedRand(42)))
 
@@ -48,10 +58,69 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 		predictions := predict(g, model, d)
 		for _, prediction := range predictions {
 			fmt.Fprintf(outputWriter, "%s,%s,%.5f\n", prediction.label, prediction.predictedClass, prediction.logit)
+
+			labelClassMetrics, ok := metrics[prediction.label]
+			if !ok {
+				labelClassMetrics = stats.NewMetricCounter()
+				metrics[prediction.label] = labelClassMetrics
+			}
+			predictedClassMetrics, ok := metrics[prediction.predictedClass]
+			if !ok {
+				predictedClassMetrics = stats.NewMetricCounter()
+				metrics[prediction.predictedClass] = labelClassMetrics
+			}
+
+			if prediction.label == prediction.predictedClass {
+				labelClassMetrics.IncTruePos()
+			} else {
+				labelClassMetrics.IncFalseNeg()
+				predictedClassMetrics.IncFalsePos()
+			}
+
 		}
 
 	}
+
+	// Sort class names for deterministic output
+	sortedClasses := sortClasses(metrics)
+	for _, class := range sortedClasses {
+		result := metrics[class]
+		fmt.Printf("Class %s: TP %d FP %d TN %d FN %d Precision %.3f Recall %.3f F1 %.3f\n",
+			class, result.TruePos, result.FalsePos, result.TrueNeg, result.FalseNeg, result.Precision(), result.Recall(),
+			result.F1Score())
+	}
+
+	microF1, macroF1 := computeOverallF1(metrics)
+	fmt.Printf("Macro F1: %.3f\nMicro F1: %.3f\n", macroF1, microF1)
 	return nil
+}
+
+func computeOverallF1(metrics map[string]*stats.ClassMetrics) (float64, float64) {
+	macroF1 := 0.0
+	for _, metric := range metrics {
+		macroF1 += metric.F1Score()
+	}
+	macroF1 /= float64(len(metrics))
+
+	micro := stats.NewMetricCounter()
+	for _, result := range metrics {
+		micro.TruePos += result.TruePos
+		micro.FalsePos += result.FalsePos
+		micro.FalseNeg += result.FalseNeg
+		micro.TrueNeg += result.TrueNeg
+	}
+	return macroF1, micro.F1Score()
+
+}
+
+func sortClasses(metrics map[string]*stats.ClassMetrics) []string {
+	result := make([]string, 0, len(metrics))
+	for class := range metrics {
+		result = append(result, class)
+	}
+	sort.Strings(result)
+	return result
+
 }
 
 type prediction struct {
