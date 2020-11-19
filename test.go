@@ -40,7 +40,7 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 
 	var outputWriter gio.Writer
 	if outputFileName != "" {
-		outputFile, err := os.Open(outputFileName)
+		outputFile, err := os.Create(outputFileName)
 		if err != nil {
 			return fmt.Errorf("error opening output file %s: %w", outputFileName, err)
 		}
