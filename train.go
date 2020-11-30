@@ -34,7 +34,7 @@ func Train(trainFile, outputFileName, targetColumn string, params model.TabNetPa
 
 	rndGen := rand.NewLockedRand(trainingParams.RndSeed)
 
-	metaData, data, err := io.LoadData(trainFile, targetColumn, trainingParams.BatchSize)
+	metaData, data, err := io.LoadData(trainFile, targetColumn, io.Set{}, trainingParams.BatchSize)
 	if err != nil {
 		log.Fatalf("Error reading training data: %s", err)
 		return

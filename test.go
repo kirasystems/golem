@@ -5,6 +5,7 @@ import (
 	"golem/io"
 	"golem/model"
 	gio "io"
+	"log"
 	"sort"
 
 	"os"
@@ -33,7 +34,7 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 		return fmt.Errorf("error loading model from file %s: %w", modelFileName, err)
 	}
 
-	_, data, err := io.LoadData(inputFileName, model.MetaData.Columns[model.MetaData.TargetColumn], 1)
+	_, data, err := io.LoadData(inputFileName, model.MetaData.Columns[model.MetaData.TargetColumn], io.Set{}, 1)
 	if err != nil {
 		return fmt.Errorf("error loading data from %s: %w", inputFileName, err)
 	}
@@ -85,13 +86,13 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 	sortedClasses := sortClasses(metrics)
 	for _, class := range sortedClasses {
 		result := metrics[class]
-		fmt.Printf("Class %s: TP %d FP %d TN %d FN %d Precision %.3f Recall %.3f F1 %.3f\n",
+		log.Printf("Class %s: TP %d FP %d TN %d FN %d Precision %.3f Recall %.3f F1 %.3f\n",
 			class, result.TruePos, result.FalsePos, result.TrueNeg, result.FalseNeg, result.Precision(), result.Recall(),
 			result.F1Score())
 	}
 
 	microF1, macroF1 := computeOverallF1(metrics)
-	fmt.Printf("Macro F1: %.3f\nMicro F1: %.3f\n", macroF1, microF1)
+	log.Printf("Macro F1: %.3f - Micro F1: %.3f\n", macroF1, microF1)
 	return nil
 }
 
@@ -145,8 +146,8 @@ func predict(g *ag.Graph, model *model.Model, data io.DataBatch) []prediction {
 	logits := proc.Forward(input...)
 	for i := range logits {
 		class, logit := argmax(logits[i].Value().Data())
-		className := model.MetaData.InverseTargetMap[class]
-		label := model.MetaData.InverseTargetMap[int(data.Targets[i])]
+		className := model.MetaData.TargetMap.IndexToName[class]
+		label := model.MetaData.TargetMap.IndexToName[int(data.Targets[i])]
 		result[i] = prediction{
 			predictedClass: className,
 			label:          label,

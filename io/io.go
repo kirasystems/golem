@@ -22,9 +22,11 @@ func (d *DataBatch) Size() int {
 	return len(d.Targets)
 }
 
+type Set map[string]struct{}
+
 // LoadData reads the train file and splits it into batches of at most batchSize elements.
 // TODO: add support for categorical features
-func LoadData(trainFile, targetColumn string, batchSize int) (*model.Metadata, []DataBatch, error) {
+func LoadData(trainFile, targetColumn string, categoricalColumns Set, batchSize int) (*model.Metadata, []DataBatch, error) {
 
 	inputFile, err := os.Open(trainFile)
 	if err != nil {
@@ -40,12 +42,8 @@ func LoadData(trainFile, targetColumn string, batchSize int) (*model.Metadata, [
 		return nil, nil, fmt.Errorf("error reading data header: %w", err)
 	}
 
-	metaData := model.Metadata{
-		Columns:                record,
-		ContinuousFeaturesMap:  map[int]int{},
-		CategoricalFeaturesMap: map[int]int{},
-		TargetColumn:           -1,
-	}
+	metaData := model.NewMetadata()
+	metaData.Columns = record
 
 	for i, col := range metaData.Columns {
 		if col == targetColumn {
@@ -57,12 +55,18 @@ func LoadData(trainFile, targetColumn string, batchSize int) (*model.Metadata, [
 		return nil, nil, fmt.Errorf("target column %s not found in data header", targetColumn)
 	}
 
-	ind := 0
-	//TODO: add support for categorical features
-	for i := range metaData.Columns {
+	continuousInd, categoricalInd := 0, 0
+
+	for i, col := range metaData.Columns {
+		_, isCategorical := categoricalColumns[col]
 		if i != metaData.TargetColumn {
-			metaData.ContinuousFeaturesMap[i] = ind
-			ind++
+			if !isCategorical {
+				metaData.ContinuousFeaturesMap.Set(i, continuousInd)
+				continuousInd++
+			} else {
+				metaData.CategoricalFeaturesMap.Set(i, categoricalInd)
+				categoricalInd++
+			}
 		}
 	}
 
@@ -71,19 +75,20 @@ func LoadData(trainFile, targetColumn string, batchSize int) (*model.Metadata, [
 	currentLine := 0
 
 	for record, err = reader.Read(); err == nil; record, err = reader.Read() {
+		//TODO: add support for continuous targets
 		target := metaData.ParseCategoricalTarget(record[metaData.TargetColumn])
 		if err != nil {
 			return nil, nil, fmt.Errorf("error parsing target at line %d: %w", currentLine, err)
 		}
 		currentBatch.Targets = append(currentBatch.Targets, target)
-		continuousFeatures := mat.NewEmptyVecDense(len(metaData.ContinuousFeaturesMap))
+		continuousFeatures := mat.NewEmptyVecDense(metaData.ContinuousFeaturesMap.Size())
 		//TODO: parse categorical features
-		for c1, c2 := range metaData.ContinuousFeaturesMap {
-			value, err := strconv.ParseFloat(record[c1], 64)
+		for column, index := range metaData.ContinuousFeaturesMap.ColumnToIndex {
+			value, err := strconv.ParseFloat(record[column], 64)
 			if err != nil {
-				return nil, nil, fmt.Errorf("error parsing feature %s at line %d: %w", metaData.Columns[c1], currentLine, err)
+				return nil, nil, fmt.Errorf("error parsing feature %s at line %d: %w", metaData.Columns[column], currentLine, err)
 			}
-			continuousFeatures.Set(c2, 0, value)
+			continuousFeatures.Set(index, 0, value)
 		}
 
 		currentBatch.ContinuousFeatures = append(currentBatch.ContinuousFeatures, continuousFeatures)
@@ -99,7 +104,7 @@ func LoadData(trainFile, targetColumn string, batchSize int) (*model.Metadata, [
 		result = append(result, currentBatch)
 	}
 
-	return &metaData, result, nil
+	return metaData, result, nil
 }
 
 func SaveModel(model *model.Model, writer io.Writer) error {
