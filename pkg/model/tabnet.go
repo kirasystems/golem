@@ -291,8 +291,7 @@ func (p *TabNetProcessor) Forward(xs ...ag.Node) []ag.Node {
 				maskedFeatures[k] = g.Prod(input[k], mask[k])
 				stepAttentionEntropy := g.ReduceSum(g.Prod(g.Neg(mask[k]), g.Log(g.AddScalar(mask[k], g.Constant(Epsilon)))))
 				stepAttentionEntropy = g.DivScalar(stepAttentionEntropy, g.Constant(float64(p.model.NumDecisionSteps-1)))
-				p.AttentionEntropy[k] = g.Add(p.AttentionEntropy[k],
-					stepAttentionEntropy)
+				p.AttentionEntropy[k] = g.Add(p.AttentionEntropy[k], stepAttentionEntropy)
 			}
 		}
 	}
