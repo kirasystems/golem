@@ -1,8 +1,8 @@
-package main
+package pkg
 
 import (
-	"golem/io"
-	"golem/model"
+	"golem/pkg/io"
+	"golem/pkg/model"
 	"log"
 	"os"
 

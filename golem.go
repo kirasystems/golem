@@ -1,7 +1,8 @@
 package main
 
 import (
-	"golem/model"
+	"golem/pkg"
+	"golem/pkg/model"
 
 	"github.com/spf13/cobra"
 )
@@ -11,7 +12,7 @@ func TrainCommand() *cobra.Command {
 	var trainFile string
 	var outputFile string
 	var targetColumn string
-	var trainingParameters TrainingParameters
+	var trainingParameters pkg.TrainingParameters
 	var modelParameters model.TabNetParameters
 
 	var cmd = &cobra.Command{
@@ -19,7 +20,7 @@ func TrainCommand() *cobra.Command {
 		Short: "Trains a new model on the provided training data and saves the trained model",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			Train(trainFile, outputFile, targetColumn, modelParameters, trainingParameters)
+			pkg.Train(trainFile, outputFile, targetColumn, modelParameters, trainingParameters)
 			return nil
 		},
 	}
@@ -57,7 +58,7 @@ func TestCommand() *cobra.Command {
 		Short: "Runs the provided model on the specified data input and stores the results in the output file if provided, or stdout",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return Test(modelFile, inputFile, outputFile)
+			return pkg.Test(modelFile, inputFile, outputFile)
 		},
 	}
 

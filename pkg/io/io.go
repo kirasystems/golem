@@ -4,7 +4,7 @@ import (
 	"encoding/csv"
 	"encoding/gob"
 	"fmt"
-	"golem/model"
+	"golem/pkg/model"
 	"io"
 	"os"
 	"strconv"

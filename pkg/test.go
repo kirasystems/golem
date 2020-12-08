@@ -1,9 +1,9 @@
-package main
+package pkg
 
 import (
 	"fmt"
-	"golem/io"
-	"golem/model"
+	"golem/pkg/io"
+	"golem/pkg/model"
 	gio "io"
 	"log"
 	"sort"
