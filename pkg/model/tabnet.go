@@ -255,15 +255,11 @@ func (p *TabNetProcessor) SetMode(mode nn.ProcessingMode) {
 	p.attentionBatchNormProcessor.SetMode(mode)
 
 }
+
 func (p *TabNetProcessor) Forward(xs ...ag.Node) []ag.Node {
 	g := p.Graph
 
 	input := p.featureBatchNormProcessor.Forward(xs...)
-
-	outputAggregated := make([]ag.Node, len(xs))
-	for i := range xs {
-		outputAggregated[i] = g.NewVariable(mat.NewEmptyVecDense(p.model.OutputDimension), true)
-	}
 
 	complementaryAggregatedMaskValues := make([]ag.Node, len(xs))
 	for i := range xs {
@@ -271,12 +267,7 @@ func (p *TabNetProcessor) Forward(xs ...ag.Node) []ag.Node {
 	}
 
 	p.AttentionEntropy = make([]ag.Node, len(xs))
-	for i := range xs {
-		p.AttentionEntropy[i] = g.NewVariable(mat.NewScalar(0.0), true)
-	}
-
-	//TODO: use_bias=false? (linear)
-
+	outputAggregated := make([]ag.Node, len(xs))
 	maskedFeatures := p.copy(input)
 
 	for i := 0; i < p.model.NumDecisionSteps; i++ {
