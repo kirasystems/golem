@@ -277,13 +277,7 @@ func (p *TabNetProcessor) Forward(xs ...ag.Node) []ag.Node {
 
 	//TODO: use_bias=false? (linear)
 
-	ones := g.NewVariable(input[0].Value().OnesLike(), false)
-
-	maskedFeatures := make([]ag.Node, len(input))
-	for i := range maskedFeatures {
-		//TODO: any better way of making a copy of input in a gradient-preserving way?
-		maskedFeatures[i] = g.Prod(input[i], ones)
-	}
+	maskedFeatures := p.copy(input)
 
 	for i := 0; i < p.model.NumDecisionSteps; i++ {
 		transformed := p.sharedTransformerProcessor.Forward(maskedFeatures...)
@@ -313,6 +307,15 @@ func (p *TabNetProcessor) Forward(xs ...ag.Node) []ag.Node {
 	}
 
 	return p.outputProcessor.Forward(outputAggregated...)
+}
+
+// copy makes a copy of input in a gradient-preserving way
+func (p *TabNetProcessor) copy(xs []ag.Node) []ag.Node {
+	ys := make([]ag.Node, len(xs))
+	for i, x := range xs {
+		ys[i] = p.Graph.Identity(x)
+	}
+	return ys
 }
 
 func (m *TabNet) Init(generator *rand.LockedRand) {
