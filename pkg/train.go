@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/nlpodyssey/spago/pkg/mat"
 	"github.com/nlpodyssey/spago/pkg/mat/rand"
 	"github.com/nlpodyssey/spago/pkg/ml/ag"
 	"github.com/nlpodyssey/spago/pkg/ml/losses"
@@ -91,7 +90,7 @@ func Train(trainFile, outputFileName, targetColumn string, params model.TabNetPa
 func (t *Trainer) trainBatch(batch *io.DataBatch) (float64, float64, float64) {
 	t.optimizer.IncBatch()
 
-	g := ag.NewGraph(ag.Rand(rand.NewLockedRand(t.params.RndSeed)))
+	g := ag.NewGraph(ag.Rand(rand.NewLockedRand(t.params.RndSeed))) // TODO: we might use the same random generator among the batches until we run them concurrently
 	defer g.Clear()
 	input := make([]ag.Node, len(batch.Features))
 	//TODO: add support for categorical features
@@ -100,9 +99,8 @@ func (t *Trainer) trainBatch(batch *io.DataBatch) (float64, float64, float64) {
 	}
 	modelProc := t.model.NewProc(g).(*model.TabNetProcessor)
 	logits := modelProc.Forward(input...)
-	loss := g.NewVariable(mat.NewScalar(0), true)
-	classificationLoss := g.NewVariable(mat.NewScalar(0), true)
-	sparsityLoss := g.NewVariable(mat.NewScalar(0), true)
+
+	var loss, classificationLoss, sparsityLoss ag.Node
 	for i := range batch.Targets {
 		exampleCrossEntropy := losses.CrossEntropy(g, logits[i], int(batch.Targets[i]))
 		classificationLoss = g.Add(classificationLoss, exampleCrossEntropy)
