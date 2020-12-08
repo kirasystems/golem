@@ -281,18 +281,20 @@ func (p *TabNetProcessor) Forward(xs ...ag.Node) []ag.Node {
 			}
 		}
 
-		if i < p.model.NumDecisionSteps-1 {
-			mask := p.attentionBatchNormProcessor.Forward(p.attentionTransformerProcessor.Forward(transformed...)...)
-			for k := range mask {
-				mask[k] = g.Prod(mask[k], complementaryAggregatedMaskValues[k])
-				mask[k] = g.SparseMax(mask[k])
-				complementaryAggregatedMaskValues[k] = g.Prod(complementaryAggregatedMaskValues[k],
-					g.Neg(g.SubScalar(mask[k], g.Constant(p.model.RelaxationFactor))))
-				maskedFeatures[k] = g.Prod(input[k], mask[k])
-				stepAttentionEntropy := g.ReduceSum(g.Prod(g.Neg(mask[k]), g.Log(g.AddScalar(mask[k], g.Constant(Epsilon)))))
-				stepAttentionEntropy = g.DivScalar(stepAttentionEntropy, g.Constant(float64(p.model.NumDecisionSteps-1)))
-				p.AttentionEntropy[k] = g.Add(p.AttentionEntropy[k], stepAttentionEntropy)
-			}
+		if i == p.model.NumDecisionSteps-1 {
+			continue // skip attention entropy calculation
+		}
+
+		mask := p.attentionBatchNormProcessor.Forward(p.attentionTransformerProcessor.Forward(transformed...)...)
+		for k := range mask {
+			mask[k] = g.Prod(mask[k], complementaryAggregatedMaskValues[k])
+			mask[k] = g.SparseMax(mask[k])
+			complementaryAggregatedMaskValues[k] = g.Prod(complementaryAggregatedMaskValues[k],
+				g.Neg(g.SubScalar(mask[k], g.Constant(p.model.RelaxationFactor))))
+			maskedFeatures[k] = g.Prod(input[k], mask[k])
+			stepAttentionEntropy := g.ReduceSum(g.Prod(g.Neg(mask[k]), g.Log(g.AddScalar(mask[k], g.Constant(Epsilon)))))
+			stepAttentionEntropy = g.DivScalar(stepAttentionEntropy, g.Constant(float64(p.model.NumDecisionSteps-1)))
+			p.AttentionEntropy[k] = g.Add(p.AttentionEntropy[k], stepAttentionEntropy)
 		}
 	}
 
