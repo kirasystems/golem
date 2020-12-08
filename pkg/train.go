@@ -52,10 +52,10 @@ func Train(trainFile, outputFileName, targetColumn string, params model.TabNetPa
 	t.model = model.NewTabNet(params)
 	t.model.Init(rndGen)
 
-	updaterConfig := adam.NewDefaultConfig()
+	updaterConfig := adam.NewDefaultConfig() // TODO: `radam` may provide better results
 	updaterConfig.StepSize = trainingParams.LearningRate
 	updater := adam.New(updaterConfig)
-	const GradientClipTreshold = 2000.0
+	const GradientClipTreshold = 2000.0 // TODO: get from configuration
 	t.optimizer = gd.NewOptimizer(updater, nn.NewDefaultParamsIterator(t.model),
 		gd.ClipGradByValue(GradientClipTreshold))
 
@@ -70,7 +70,7 @@ func Train(trainFile, outputFileName, targetColumn string, params model.TabNetPa
 		}
 	}
 
-	model := model.Model{
+	m := model.Model{
 		MetaData: metaData,
 		TabNet:   t.model,
 	}
@@ -81,7 +81,7 @@ func Train(trainFile, outputFileName, targetColumn string, params model.TabNetPa
 	}
 	defer outputFile.Close()
 
-	err = io.SaveModel(&model, outputFile)
+	err = io.SaveModel(&m, outputFile)
 	if err != nil {
 		log.Printf("Error saving model to %s: %s", outputFileName, err)
 	}
