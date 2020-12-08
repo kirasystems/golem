@@ -13,7 +13,7 @@ import (
 func TestIris(t *testing.T) {
 
 	trainCmd := TrainCommand()
-	trainCmd.SetArgs(strings.Split("-i datasets/iris.train -o /tmp/iris.model -t species -n 20 -s 3 --sparsity-loss-weight 0.01", " "))
+	trainCmd.SetArgs(strings.Split("-i datasets/iris/iris.train -o /tmp/iris.model -t species -n 20 -s 3 --sparsity-loss-weight 0.01", " "))
 	b := bytes.NewBufferString("")
 	log.SetOutput(b)
 	err := trainCmd.Execute()
@@ -26,7 +26,7 @@ func TestIris(t *testing.T) {
 	require.False(t, strings.Contains(strings.ToLower(out), "error"))
 
 	testCmd := TestCommand()
-	testCmd.SetArgs(strings.Split("test -m /tmp/iris.model -i datasets/iris.test", " "))
+	testCmd.SetArgs(strings.Split("test -m /tmp/iris.model -i datasets/iris/iris.test", " "))
 	b.Reset()
 	err = testCmd.Execute()
 	require.NoError(t, err)
