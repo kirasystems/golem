@@ -30,6 +30,7 @@ func TrainCommand() *cobra.Command {
 	cmd.Flags().Float64VarP(&trainingParameters.LearningRate, "learning-rate", "l", 0.01, "learning rate")
 	cmd.Flags().IntVarP(&trainingParameters.ReportInterval, "report-interval", "r", 10, "loss report interval")
 	cmd.Flags().IntVarP(&trainingParameters.NumEpochs, "num-epochs", "n", 10, "number of epochs to train")
+	cmd.Flags().IntVarP(&trainingParameters.CategoricalEmbeddingSize, "categorical-embedding-size", "c", 1, "size of categorical embeddings")
 	cmd.Flags().Uint64VarP(&trainingParameters.RndSeed, "random-seed", "x", 42, "random seed")
 	cmd.Flags().IntVarP(&modelParameters.NumDecisionSteps, "num-decision-steps", "s", 2, "number of decision steps")
 	cmd.Flags().IntVarP(&modelParameters.FeatureDimension, "feature-dimension", "f", 4, "feature dimension")

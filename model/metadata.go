@@ -67,6 +67,9 @@ type Metadata struct {
 
 	// TargetMap contains a mapping of target category names to target category indexes
 	TargetMap NameMap
+
+	// CategoricalEmbeddingSize is the size of each categorical feature embedding
+	CategoricalEmbeddingSize int
 }
 
 func NewMetadata() *Metadata {

@@ -34,7 +34,13 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 		return fmt.Errorf("error loading model from file %s: %w", modelFileName, err)
 	}
 
-	_, data, err := io.LoadData(inputFileName, model.MetaData.Columns[model.MetaData.TargetColumn], io.Set{}, 1)
+	_, data, err := io.LoadData(io.DataParameters{
+		TrainFile:                inputFileName,
+		TargetColumn:             model.MetaData.Columns[model.MetaData.TargetColumn],
+		CategoricalColumns:       nil,
+		BatchSize:                1,
+		CategoricalEmbeddingSize: model.MetaData.CategoricalEmbeddingSize,
+	})
 	if err != nil {
 		return fmt.Errorf("error loading data from %s: %w", inputFileName, err)
 	}
@@ -137,8 +143,8 @@ func predict(g *ag.Graph, model *model.Model, data io.DataBatch) []prediction {
 
 	input := make([]ag.Node, data.Size())
 	//TODO: add support for categorical features
-	for i := range data.ContinuousFeatures {
-		input[i] = g.NewVariable(data.ContinuousFeatures[i], false)
+	for i := range data.Features {
+		input[i] = g.NewVariable(data.Features[i], false)
 	}
 
 	proc := model.TabNet.NewProc(g)

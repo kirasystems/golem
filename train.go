@@ -16,11 +16,12 @@ import (
 )
 
 type TrainingParameters struct {
-	BatchSize      int
-	NumEpochs      int
-	LearningRate   float64
-	ReportInterval int
-	RndSeed        uint64
+	BatchSize                int
+	CategoricalEmbeddingSize int
+	NumEpochs                int
+	LearningRate             float64
+	ReportInterval           int
+	RndSeed                  uint64
 }
 
 type Trainer struct {
@@ -34,7 +35,13 @@ func Train(trainFile, outputFileName, targetColumn string, params model.TabNetPa
 
 	rndGen := rand.NewLockedRand(trainingParams.RndSeed)
 
-	metaData, data, err := io.LoadData(trainFile, targetColumn, io.Set{}, trainingParams.BatchSize)
+	metaData, data, err := io.LoadData(io.DataParameters{
+		TrainFile:                trainFile,
+		TargetColumn:             targetColumn,
+		CategoricalColumns:       io.Set{},
+		BatchSize:                trainingParams.BatchSize,
+		CategoricalEmbeddingSize: trainingParams.CategoricalEmbeddingSize})
+
 	if err != nil {
 		log.Fatalf("Error reading training data: %s", err)
 		return
@@ -86,10 +93,10 @@ func (t *Trainer) trainBatch(batch *io.DataBatch) (float64, float64, float64) {
 
 	g := ag.NewGraph(ag.Rand(rand.NewLockedRand(t.params.RndSeed)))
 	defer g.Clear()
-	input := make([]ag.Node, len(batch.ContinuousFeatures))
+	input := make([]ag.Node, len(batch.Features))
 	//TODO: add support for categorical features
 	for i := range input {
-		input[i] = g.NewVariable(batch.ContinuousFeatures[i], false)
+		input[i] = g.NewVariable(batch.Features[i], false)
 	}
 	modelProc := t.model.NewProc(g).(*model.TabNetProcessor)
 	logits := modelProc.Forward(input...)
