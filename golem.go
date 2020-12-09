@@ -13,7 +13,7 @@ func TrainCommand() *cobra.Command {
 	var outputFile string
 	var targetColumn string
 	var trainingParameters pkg.TrainingParameters
-	var modelParameters model.TabNetParameters
+	var modelParameters model.TabNetConfig
 
 	var cmd = &cobra.Command{
 		Use:   "train -i trainData -o outputFile",

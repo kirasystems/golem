@@ -153,14 +153,7 @@ func NewFeatureTransformerBlock(featureDimension int, batchMomentum float64) *Fe
 //  TabNet is an implementation of:
 // "TabNet: Attentive Interpretable Tabular Learning" - https://arxiv.org/abs/1908.07442
 type TabNet struct {
-	NumDecisionSteps   int
-	NumColumns         int
-	FeatureDimension   int
-	OutputDimension    int
-	RelaxationFactor   float64
-	BatchMomentum      float64
-	VirtualBatchSize   int
-	SparsityLossWeight float64
+	TabNetConfig
 
 	FeatureBatchNorm         *batchnorm.Model
 	SharedFeatureTransformer *FeatureTransformerBlock
@@ -173,7 +166,7 @@ type TabNet struct {
 
 const Epsilon = 0.00001
 
-type TabNetParameters struct {
+type TabNetConfig struct {
 	NumDecisionSteps   int
 	NumColumns         int
 	FeatureDimension   int
@@ -184,28 +177,21 @@ type TabNetParameters struct {
 	SparsityLossWeight float64
 }
 
-func NewTabNet(p TabNetParameters) *TabNet {
+func NewTabNet(config TabNetConfig) *TabNet {
 
-	stepFeatureTransformers := make([]*FeatureTransformerBlock, p.NumDecisionSteps)
+	stepFeatureTransformers := make([]*FeatureTransformerBlock, config.NumDecisionSteps)
 	for i := range stepFeatureTransformers {
-		stepFeatureTransformers[i] = NewFeatureTransformerBlock(p.FeatureDimension, p.BatchMomentum)
+		stepFeatureTransformers[i] = NewFeatureTransformerBlock(config.FeatureDimension, config.BatchMomentum)
 	}
 
-	return &TabNet{NumDecisionSteps: p.NumDecisionSteps,
-		NumColumns:         p.NumColumns,
-		FeatureDimension:   p.FeatureDimension,
-		OutputDimension:    p.OutputDimension,
-		RelaxationFactor:   p.RelaxationFactor,
-		BatchMomentum:      p.BatchMomentum,
-		VirtualBatchSize:   p.VirtualBatchSize,
-		SparsityLossWeight: p.SparsityLossWeight,
-
-		FeatureBatchNorm:         batchnorm.NewWithMomentum(p.NumColumns, p.BatchMomentum),
-		SharedFeatureTransformer: NewFeatureTransformerBlock(p.FeatureDimension, p.BatchMomentum),
+	return &TabNet{
+		TabNetConfig:             config,
+		FeatureBatchNorm:         batchnorm.NewWithMomentum(config.NumColumns, config.BatchMomentum),
+		SharedFeatureTransformer: NewFeatureTransformerBlock(config.FeatureDimension, config.BatchMomentum),
 		StepFeatureTransformers:  stepFeatureTransformers,
-		AttentionTransformer:     linear.New(p.FeatureDimension, p.NumColumns, linear.BiasGrad(false)),
-		AttentionBatchNorm:       batchnorm.NewWithMomentum(p.NumColumns, p.BatchMomentum),
-		OutputLayer:              linear.New(p.FeatureDimension, p.OutputDimension, linear.BiasGrad(false)),
+		AttentionTransformer:     linear.New(config.FeatureDimension, config.NumColumns, linear.BiasGrad(false)),
+		AttentionBatchNorm:       batchnorm.NewWithMomentum(config.NumColumns, config.BatchMomentum),
+		OutputLayer:              linear.New(config.FeatureDimension, config.OutputDimension, linear.BiasGrad(false)),
 	}
 }
 

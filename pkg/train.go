@@ -29,7 +29,7 @@ type Trainer struct {
 	model     *model.TabNet
 }
 
-func Train(trainFile, outputFileName, targetColumn string, params model.TabNetParameters, trainingParams TrainingParameters) {
+func Train(trainFile, outputFileName, targetColumn string, config model.TabNetConfig, trainingParams TrainingParameters) {
 	t := &Trainer{params: trainingParams}
 
 	rndGen := rand.NewLockedRand(trainingParams.RndSeed)
@@ -47,8 +47,8 @@ func Train(trainFile, outputFileName, targetColumn string, params model.TabNetPa
 	}
 
 	//Overwrite number of feature columns as this is only known after parsing the dataset
-	params.NumColumns = metaData.FeatureCount()
-	t.model = model.NewTabNet(params)
+	config.NumColumns = metaData.FeatureCount()
+	t.model = model.NewTabNet(config)
 	t.model.Init(rndGen)
 
 	updaterConfig := adam.NewDefaultConfig() // TODO: `radam` may provide better results
