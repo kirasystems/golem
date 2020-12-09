@@ -70,20 +70,20 @@ func (m *TabNet) Init(generator *rand.LockedRand) {
 type TabNetProcessor struct {
 	nn.BaseProcessor
 	model                         *TabNet
-	featureBatchNormProcessor     nn.Processor
-	sharedTransformerProcessor    nn.Processor
-	stepTransformerProcessors     []nn.Processor
-	attentionTransformerProcessor nn.Processor
-	attentionBatchNormProcessor   nn.Processor
-	outputProcessor               nn.Processor
+	featureBatchNormProcessor     *batchnorm.Processor
+	sharedTransformerProcessor    *featuretransformer.Processor
+	stepTransformerProcessors     []*featuretransformer.Processor
+	attentionTransformerProcessor *linear.Processor
+	attentionBatchNormProcessor   *batchnorm.Processor
+	outputProcessor               *linear.Processor
 
 	AttentionEntropy []ag.Node // computed by forward
 }
 
 func (m *TabNet) NewProc(g *ag.Graph) nn.Processor {
-	stepTransformerProcessors := make([]nn.Processor, m.NumDecisionSteps)
+	stepTransformerProcessors := make([]*featuretransformer.Processor, m.NumDecisionSteps)
 	for i := range stepTransformerProcessors {
-		stepTransformerProcessors[i] = m.StepFeatureTransformers[i].NewProc(g)
+		stepTransformerProcessors[i] = m.StepFeatureTransformers[i].NewProc(g).(*featuretransformer.Processor)
 	}
 	return &TabNetProcessor{
 		BaseProcessor: nn.BaseProcessor{
@@ -93,12 +93,12 @@ func (m *TabNet) NewProc(g *ag.Graph) nn.Processor {
 			FullSeqProcessing: true,
 		},
 		model:                         m,
-		featureBatchNormProcessor:     m.FeatureBatchNorm.NewProc(g),
-		sharedTransformerProcessor:    m.SharedFeatureTransformer.NewProcNoResidual(g),
+		featureBatchNormProcessor:     m.FeatureBatchNorm.NewProc(g).(*batchnorm.Processor),
+		sharedTransformerProcessor:    m.SharedFeatureTransformer.NewProcNoResidual(g).(*featuretransformer.Processor),
 		stepTransformerProcessors:     stepTransformerProcessors,
-		outputProcessor:               m.OutputLayer.NewProc(g),
-		attentionTransformerProcessor: m.AttentionTransformer.NewProc(g),
-		attentionBatchNormProcessor:   m.AttentionBatchNorm.NewProc(g),
+		outputProcessor:               m.OutputLayer.NewProc(g).(*linear.Processor),
+		attentionTransformerProcessor: m.AttentionTransformer.NewProc(g).(*linear.Processor),
+		attentionBatchNormProcessor:   m.AttentionBatchNorm.NewProc(g).(*batchnorm.Processor),
 	}
 }
 
@@ -106,7 +106,9 @@ func (p *TabNetProcessor) SetMode(mode nn.ProcessingMode) {
 	p.Mode = mode
 	p.featureBatchNormProcessor.SetMode(mode)
 	p.sharedTransformerProcessor.SetMode(mode)
-	nn.SetProcessingMode(mode, p.stepTransformerProcessors...)
+	for _, proc := range p.stepTransformerProcessors {
+		proc.SetMode(mode)
+	}
 	p.outputProcessor.SetMode(mode)
 	p.attentionTransformerProcessor.SetMode(mode)
 	p.attentionBatchNormProcessor.SetMode(mode)
