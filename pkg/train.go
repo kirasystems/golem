@@ -54,9 +54,9 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 	updaterConfig := adam.NewDefaultConfig() // TODO: `radam` may provide better results
 	updaterConfig.StepSize = trainingParams.LearningRate
 	updater := adam.New(updaterConfig)
-	const GradientClipTreshold = 2000.0 // TODO: get from configuration
+	const GradientClipThreshold = 2000.0 // TODO: get from configuration
 	t.optimizer = gd.NewOptimizer(updater, nn.NewDefaultParamsIterator(t.model),
-		gd.ClipGradByValue(GradientClipTreshold))
+		gd.ClipGradByValue(GradientClipThreshold))
 
 	for epoch := 0; epoch < trainingParams.NumEpochs; epoch++ {
 		t.optimizer.IncEpoch()
@@ -97,7 +97,7 @@ func (t *Trainer) trainBatch(batch *io.DataBatch) (float64, float64, float64) {
 	for i := range input {
 		input[i] = g.NewVariable(batch.Features[i], false)
 	}
-	modelProc := t.model.NewProc(g).(*model.TabNetProcessor)
+	modelProc := t.model.NewProc(nn.Context{Graph: g, Mode: nn.Training}).(*model.TabNetProcessor)
 	logits := modelProc.Forward(input...)
 
 	var loss, classificationLoss, sparsityLoss ag.Node

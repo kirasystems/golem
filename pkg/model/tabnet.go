@@ -80,38 +80,26 @@ type TabNetProcessor struct {
 	AttentionEntropy []ag.Node // computed by forward
 }
 
-func (m *TabNet) NewProc(g *ag.Graph) nn.Processor {
+func (m *TabNet) NewProc(ctx nn.Context) nn.Processor {
 	stepTransformerProcessors := make([]*featuretransformer.Processor, m.NumDecisionSteps)
 	for i := range stepTransformerProcessors {
-		stepTransformerProcessors[i] = m.StepFeatureTransformers[i].NewProc(g).(*featuretransformer.Processor)
+		stepTransformerProcessors[i] = m.StepFeatureTransformers[i].NewProc(ctx).(*featuretransformer.Processor)
 	}
 	return &TabNetProcessor{
 		BaseProcessor: nn.BaseProcessor{
 			Model:             m,
-			Mode:              nn.Training,
-			Graph:             g,
+			Mode:              ctx.Mode,
+			Graph:             ctx.Graph,
 			FullSeqProcessing: true,
 		},
 		model:                         m,
-		featureBatchNormProcessor:     m.FeatureBatchNorm.NewProc(g).(*batchnorm.Processor),
-		sharedTransformerProcessor:    m.SharedFeatureTransformer.NewProcNoResidual(g).(*featuretransformer.Processor),
+		featureBatchNormProcessor:     m.FeatureBatchNorm.NewProc(ctx).(*batchnorm.Processor),
+		sharedTransformerProcessor:    m.SharedFeatureTransformer.NewProcNoResidual(ctx).(*featuretransformer.Processor),
 		stepTransformerProcessors:     stepTransformerProcessors,
-		outputProcessor:               m.OutputLayer.NewProc(g).(*linear.Processor),
-		attentionTransformerProcessor: m.AttentionTransformer.NewProc(g).(*linear.Processor),
-		attentionBatchNormProcessor:   m.AttentionBatchNorm.NewProc(g).(*batchnorm.Processor),
+		outputProcessor:               m.OutputLayer.NewProc(ctx).(*linear.Processor),
+		attentionTransformerProcessor: m.AttentionTransformer.NewProc(ctx).(*linear.Processor),
+		attentionBatchNormProcessor:   m.AttentionBatchNorm.NewProc(ctx).(*batchnorm.Processor),
 	}
-}
-
-func (p *TabNetProcessor) SetMode(mode nn.ProcessingMode) {
-	p.Mode = mode
-	p.featureBatchNormProcessor.SetMode(mode)
-	p.sharedTransformerProcessor.SetMode(mode)
-	for _, proc := range p.stepTransformerProcessors {
-		proc.SetMode(mode)
-	}
-	p.outputProcessor.SetMode(mode)
-	p.attentionTransformerProcessor.SetMode(mode)
-	p.attentionBatchNormProcessor.SetMode(mode)
 }
 
 func (p *TabNetProcessor) Forward(xs ...ag.Node) []ag.Node {

@@ -31,24 +31,18 @@ type LayerProcessor struct {
 	batchNormProcessor  nn.Processor
 }
 
-func (m *Layer) NewProc(g *ag.Graph) nn.Processor {
+func (m *Layer) NewProc(ctx nn.Context) nn.Processor {
 	return &LayerProcessor{
 		BaseProcessor: nn.BaseProcessor{
 			Model:             m,
-			Mode:              nn.Training,
-			Graph:             g,
+			Mode:              ctx.Mode,
+			Graph:             ctx.Graph,
 			FullSeqProcessing: true,
 		},
 		inputDimension:      m.InputDimension,
-		denseLayerProcessor: m.DenseLayer.NewProc(g),
-		batchNormProcessor:  m.BatchNormLayer.NewProc(g),
+		denseLayerProcessor: m.DenseLayer.NewProc(ctx),
+		batchNormProcessor:  m.BatchNormLayer.NewProc(ctx),
 	}
-}
-
-func (p *LayerProcessor) SetMode(mode nn.ProcessingMode) {
-	p.Mode = mode
-	p.denseLayerProcessor.SetMode(mode)
-	p.batchNormProcessor.SetMode(mode)
 }
 
 func (p *LayerProcessor) Forward(xs ...ag.Node) []ag.Node {

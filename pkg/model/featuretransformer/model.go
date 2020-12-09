@@ -66,27 +66,21 @@ func (p *Processor) Forward(xs ...ag.Node) []ag.Node {
 	return l2
 }
 
-func (f *Model) NewProc(g *ag.Graph) nn.Processor {
+func (f *Model) NewProc(ctx nn.Context) nn.Processor {
 	return &Processor{
 		BaseProcessor: nn.BaseProcessor{
 			Model:             f,
-			Mode:              nn.Training,
-			Graph:             g,
+			Mode:              ctx.Mode,
+			Graph:             ctx.Graph,
 			FullSeqProcessing: true,
 		},
-		layer1Processor: f.Layer1.NewProc(g).(*LayerProcessor),
-		layer2Processor: f.Layer2.NewProc(g).(*LayerProcessor),
+		layer1Processor: f.Layer1.NewProc(ctx).(*LayerProcessor),
+		layer2Processor: f.Layer2.NewProc(ctx).(*LayerProcessor),
 	}
 }
 
-func (f *Model) NewProcNoResidual(g *ag.Graph) nn.Processor {
-	out := f.NewProc(g)
+func (f *Model) NewProcNoResidual(ctx nn.Context) nn.Processor {
+	out := f.NewProc(ctx)
 	out.(*Processor).skipResidualInput = true
 	return out
-}
-
-func (p *Processor) SetMode(mode nn.ProcessingMode) {
-	p.Mode = mode
-	p.layer1Processor.SetMode(mode)
-	p.layer2Processor.SetMode(mode)
 }

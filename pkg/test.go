@@ -147,8 +147,7 @@ func predict(g *ag.Graph, model *model.Model, data io.DataBatch) []prediction {
 		input[i] = g.NewVariable(data.Features[i], false)
 	}
 
-	proc := model.TabNet.NewProc(g)
-	proc.SetMode(nn.Inference)
+	proc := model.TabNet.NewProc(nn.Context{Graph: g, Mode: nn.Inference})
 	logits := proc.Forward(input...)
 	for i := range logits {
 		class, logit := argmax(logits[i].Value().Data())
