@@ -34,16 +34,20 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 
 	rndGen := rand.NewLockedRand(trainingParams.RndSeed)
 
-	metaData, data, err := io.LoadData(io.DataParameters{
-		TrainFile:                trainFile,
+	metaData, data, dataErrors, err := io.LoadData(io.DataParameters{
+		DataFile:                 trainFile,
 		TargetColumn:             targetColumn,
 		CategoricalColumns:       io.Set{},
 		BatchSize:                trainingParams.BatchSize,
-		CategoricalEmbeddingSize: trainingParams.CategoricalEmbeddingSize})
+		CategoricalEmbeddingSize: trainingParams.CategoricalEmbeddingSize}, nil)
 
 	if err != nil {
 		log.Fatalf("Error reading training data: %s", err)
 		return
+	}
+	printDataErrors(dataErrors)
+	if len(data) == 0 {
+		log.Fatalf("No data to train")
 	}
 
 	//Overwrite number of feature columns as this is only known after parsing the dataset

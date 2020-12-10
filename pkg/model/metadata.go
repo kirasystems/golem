@@ -6,22 +6,31 @@ type NameMap struct {
 	IndexToName map[int]string
 }
 
-func (f NameMap) Set(name string, index int) {
+func (f *NameMap) Set(name string, index int) {
 	f.NameToIndex[name] = index
 	f.IndexToName[index] = name
 }
 
-func (f NameMap) Size() int {
+func (f *NameMap) ValueFor(name string) int {
+	value, ok := f.NameToIndex[name]
+	if !ok {
+		value = len(f.NameToIndex)
+		f.NameToIndex[name] = value
+		f.IndexToName[value] = name
+	}
+	return value
+}
+func (f *NameMap) Size() int {
 	return len(f.IndexToName)
 }
 
-func (f NameMap) ContainsName(name string) (int, bool) {
+func (f *NameMap) ContainsName(name string) (int, bool) {
 	index, ok := f.NameToIndex[name]
 	return index, ok
 
 }
-func NewFeatureIndexMap() NameMap {
-	return NameMap{
+func NewNameMap() *NameMap {
+	return &NameMap{
 		NameToIndex: map[string]int{},
 		IndexToName: map[int]string{},
 	}
@@ -46,8 +55,8 @@ func (f ColumnMap) GetColumn(column int) (int, bool) {
 	index, ok := f.ColumnToIndex[column]
 	return index, ok
 }
-func NewColumnMap() ColumnMap {
-	return ColumnMap{
+func NewColumnMap() *ColumnMap {
+	return &ColumnMap{
 		ColumnToIndex: map[int]int{},
 		IndexToColumn: map[int]int{},
 	}
@@ -57,16 +66,19 @@ type Metadata struct {
 	Columns []string
 
 	// ContinuousFeaturesMap maps a data row column index to a dense matrix column index
-	ContinuousFeaturesMap ColumnMap
+	ContinuousFeaturesMap *ColumnMap
 
 	// CategoricalFeaturesMap maps a data row column index to the categorical features index
-	CategoricalFeaturesMap ColumnMap
+	CategoricalFeaturesMap *ColumnMap
+
+	// CategoricalFeaturesValuesMap maps a given categorical column to a map from values to indexes
+	CategoricalFeaturesValuesMap map[int]*NameMap
 
 	// TargetColumn points to the column in the data row that contains the prediction target
 	TargetColumn int
 
 	// TargetMap contains a mapping of target category names to target category indexes
-	TargetMap NameMap
+	TargetMap *NameMap
 
 	// CategoricalEmbeddingSize is the size of each categorical feature embedding
 	CategoricalEmbeddingSize int
@@ -74,10 +86,11 @@ type Metadata struct {
 
 func NewMetadata() *Metadata {
 	return &Metadata{
-		Columns:                nil,
-		ContinuousFeaturesMap:  NewColumnMap(),
-		CategoricalFeaturesMap: NewColumnMap(),
-		TargetMap:              NewFeatureIndexMap(),
+		Columns:                      nil,
+		ContinuousFeaturesMap:        NewColumnMap(),
+		CategoricalFeaturesMap:       NewColumnMap(),
+		CategoricalFeaturesValuesMap: map[int]*NameMap{},
+		TargetMap:                    NewNameMap(),
 	}
 }
 
@@ -86,10 +99,6 @@ func (d *Metadata) FeatureCount() int {
 }
 
 func (d *Metadata) ParseCategoricalTarget(value string) float64 {
-	target, ok := d.TargetMap.ContainsName(value)
-	if !ok {
-		target = d.TargetMap.Size()
-		d.TargetMap.Set(value, target)
-	}
-	return float64(target)
+	return float64(d.TargetMap.ValueFor(value))
+
 }

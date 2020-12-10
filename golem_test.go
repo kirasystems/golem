@@ -33,7 +33,7 @@ func TestIris(t *testing.T) {
 	outBytes, err = ioutil.ReadAll(b)
 	require.NoError(t, err)
 	out = string(outBytes)
-	require.True(t, strings.Contains(out, "Macro F1: 0.900"))
+	require.True(t, strings.Contains(out, "Macro F1: 0.90"))
 	require.False(t, strings.Contains(strings.ToLower(out), "error"))
 
 }

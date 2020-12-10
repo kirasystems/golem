@@ -34,17 +34,21 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 		return fmt.Errorf("error loading model from file %s: %w", modelFileName, err)
 	}
 
-	_, data, err := io.LoadData(io.DataParameters{
-		TrainFile:                inputFileName,
+	_, data, dataErrors, err := io.LoadData(io.DataParameters{
+		DataFile:                 inputFileName,
 		TargetColumn:             model.MetaData.Columns[model.MetaData.TargetColumn],
 		CategoricalColumns:       nil,
 		BatchSize:                1,
 		CategoricalEmbeddingSize: model.MetaData.CategoricalEmbeddingSize,
-	})
+	}, model.MetaData)
 	if err != nil {
 		return fmt.Errorf("error loading data from %s: %w", inputFileName, err)
 	}
 
+	printDataErrors(dataErrors)
+	if len(data) == 0 {
+		log.Fatalf("No data to test")
+	}
 	var outputWriter gio.Writer
 	if outputFileName != "" {
 		outputFile, err := os.Create(outputFileName)
