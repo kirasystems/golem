@@ -98,7 +98,11 @@ func (d *Metadata) FeatureCount() int {
 	return d.CategoricalFeaturesMap.Size() + d.ContinuousFeaturesMap.Size()
 }
 
-func (d *Metadata) ParseCategoricalTarget(value string) float64 {
+func (d *Metadata) ParseCategoricalTarget(value string) (float64, bool) {
+	index, ok := d.TargetMap.ContainsName(value)
+	return float64(index), ok
+}
+func (d *Metadata) ParseOrAddCategoricalTarget(value string) float64 {
 	return float64(d.TargetMap.ValueFor(value))
 
 }

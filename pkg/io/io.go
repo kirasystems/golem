@@ -56,7 +56,6 @@ type DataError struct {
 }
 
 // LoadData reads the train file and splits it into batches of at most BatchSize elements.
-// TODO: add support for categorical features
 func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []DataBatch, []DataError, error) {
 
 	var errors []DataError
@@ -93,15 +92,23 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []Da
 
 	for record, err = reader.Read(); err == nil; record, err = reader.Read() {
 		//TODO: add support for continuous targets
-		target := metaData.ParseCategoricalTarget(record[metaData.TargetColumn])
-		if err != nil { // TODO: this condition is always false, remove it.
-			errors = append(errors, DataError{
-				Line:  currentLine,
-				Error: fmt.Sprintf("error parsing target at line %d: %s", currentLine, err),
-			})
-			continue
+		targetValue := 0.0
+		target := record[metaData.TargetColumn]
+		if newMetadata {
+			targetValue = metaData.ParseOrAddCategoricalTarget(target)
+		} else {
+			var ok bool
+			targetValue, ok = metaData.ParseCategoricalTarget(target)
+			if !ok {
+				errors = append(errors, DataError{
+					Line:  currentLine,
+					Error: fmt.Sprintf("unknown categorical targetValue value %s at line %d", target, currentLine),
+				})
+				continue
+			}
 		}
-		currentBatch.Targets = append(currentBatch.Targets, target)
+
+		currentBatch.Targets = append(currentBatch.Targets, targetValue)
 		features := mat.NewEmptyVecDense(featureSize)
 
 		for column, index := range metaData.ContinuousFeaturesMap.ColumnToIndex {
