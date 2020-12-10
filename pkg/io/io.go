@@ -92,62 +92,34 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []Da
 
 	for record, err = reader.Read(); err == nil; record, err = reader.Read() {
 		//TODO: add support for continuous targets
-		targetValue := 0.0
-		target := record[metaData.TargetColumn]
-		if newMetadata {
-			targetValue = metaData.ParseOrAddCategoricalTarget(target)
-		} else {
-			var ok bool
-			targetValue, ok = metaData.ParseCategoricalTarget(target)
-			if !ok {
-				errors = append(errors, DataError{
-					Line:  currentLine,
-					Error: fmt.Sprintf("unknown categorical targetValue value %s at line %d", target, currentLine),
-				})
-				continue
-			}
+		targetValue, err := parseTarget(newMetadata, metaData, record[metaData.TargetColumn])
+		if err != nil {
+			errors = append(errors, DataError{
+				Line:  currentLine,
+				Error: err.Error(),
+			})
+			continue
 		}
 
 		currentBatch.Targets = append(currentBatch.Targets, targetValue)
 		features := mat.NewEmptyVecDense(featureSize)
 
-		for column, index := range metaData.ContinuousFeaturesMap.ColumnToIndex {
-			value, err := strconv.ParseFloat(record[column], 64)
-			if err != nil {
-				errors = append(errors, DataError{
-					Line:  currentLine,
-					Error: fmt.Sprintf("error parsing feature %s at line %d: %s", metaData.Columns[column], currentLine, err),
-				})
-			}
-			features.Set(index, 0, value)
+		err = parseContinuousFeatures(metaData, record, features)
+		if err != nil {
+			errors = append(errors, DataError{
+				Line:  currentLine,
+				Error: err.Error(),
+			})
+			continue
 		}
 
-		categoricalFeatures := make([]int, 0, metaData.CategoricalFeaturesMap.Size())
-		for column, index := range metaData.CategoricalFeaturesMap.ColumnToIndex {
-			categoryNameMap, ok := metaData.CategoricalFeaturesValuesMap[index]
-			if !ok {
-				if newMetadata {
-					categoryNameMap = model.NewNameMap()
-					metaData.CategoricalFeaturesValuesMap[index] = categoryNameMap
-				} else {
-					return nil, nil, nil, fmt.Errorf("unknown categorical attribute %s (should not happen!)", metaData.Columns[column])
-				}
-
-			}
-			categoryValue := 0
-			if newMetadata {
-				categoryValue = categoryNameMap.ValueFor(record[column])
-			} else {
-				categoryValue, ok = categoryNameMap.NameToIndex[record[column]]
-				if !ok {
-					errors = append(errors, DataError{
-						Line:  currentLine,
-						Error: fmt.Sprintf("unknown value %s for categorical attribute %s", metaData.Columns[column], record[column]),
-					})
-					continue
-				}
-			}
-			categoricalFeatures = append(categoricalFeatures, categoryValue)
+		categoricalFeatures, err := parseCategoricalFeatures(metaData, newMetadata, record)
+		if err != nil {
+			errors = append(errors, DataError{
+				Line:  currentLine,
+				Error: err.Error(),
+			})
+			continue
 		}
 
 		currentBatch.Features = append(currentBatch.Features, features)
@@ -165,6 +137,59 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []Da
 	}
 
 	return metaData, result, errors, nil
+}
+
+func parseCategoricalFeatures(metaData *model.Metadata, newMetadata bool, record []string) ([]int, error) {
+	categoricalFeatures := make([]int, 0, metaData.CategoricalFeaturesMap.Size())
+	for column, index := range metaData.CategoricalFeaturesMap.ColumnToIndex {
+		categoryNameMap, ok := metaData.CategoricalFeaturesValuesMap[index]
+		if !ok {
+			if newMetadata {
+				categoryNameMap = model.NewNameMap()
+				metaData.CategoricalFeaturesValuesMap[index] = categoryNameMap
+			} else {
+				return nil, fmt.Errorf("unknown categorical attribute %s (should not happen!)", metaData.Columns[column])
+			}
+
+		}
+		categoryValue := 0
+		if newMetadata {
+			categoryValue = categoryNameMap.ValueFor(record[column])
+		} else {
+			categoryValue, ok = categoryNameMap.NameToIndex[record[column]]
+			if !ok {
+				return nil, fmt.Errorf("unknown value %s for categorical attribute %s", metaData.Columns[column], record[column])
+			}
+		}
+		categoricalFeatures = append(categoricalFeatures, categoryValue)
+	}
+	return categoricalFeatures, nil
+}
+
+func parseContinuousFeatures(metaData *model.Metadata, record []string, features *mat.Dense) error {
+	for column, index := range metaData.ContinuousFeaturesMap.ColumnToIndex {
+		value, err := strconv.ParseFloat(record[column], 64)
+		if err != nil {
+			return fmt.Errorf("error parsing feature %s: %w", metaData.Columns[column], err)
+		}
+		features.Set(index, 0, value)
+	}
+	return nil
+}
+
+func parseTarget(newMetadata bool, metaData *model.Metadata, target string) (float64, error) {
+	targetValue := 0.0
+	if newMetadata {
+		targetValue = metaData.ParseOrAddCategoricalTarget(target)
+	} else {
+		var ok bool
+		targetValue, ok = metaData.ParseCategoricalTarget(target)
+		if !ok {
+			return 0, fmt.Errorf("unknown categorical targetValue value %s", target)
+		}
+	}
+
+	return targetValue, nil
 }
 
 func buildFeatureIndex(p DataParameters, metaData *model.Metadata) {
