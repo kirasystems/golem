@@ -20,12 +20,18 @@ var (
 // "TabNet: Attentive Interpretable Tabular Learning" - https://arxiv.org/abs/1908.07442
 type TabNet struct {
 	TabNetConfig
-	FeatureBatchNorm         *batchnorm.Model
-	SharedFeatureTransformer *featuretransformer.Model
-	StepFeatureTransformers  []*featuretransformer.Model
-	AttentionTransformer     *linear.Model
-	AttentionBatchNorm       *batchnorm.Model
-	OutputLayer              *linear.Model
+	FeatureBatchNorm             *batchnorm.Model
+	SharedFeatureTransformer     *featuretransformer.Model
+	StepFeatureTransformers      []*featuretransformer.Model
+	AttentionTransformer         *linear.Model
+	AttentionBatchNorm           *batchnorm.Model
+	OutputLayer                  *linear.Model
+	CategoricalFeatureEmbeddings map[string]*nn.Param
+	// ^^^^^
+	// Yeah, the categorical embeddings et the end are params of the model, that will be optimized end-to-end during training!
+	//
+	// So we need to keep the structure almost flat due to current limits on a method as ugly as it is important in spaGO like the `forEachParam()`:
+	// https://github.com/nlpodyssey/spago/blob/622a04e24a0784ecc02a1181b517f898c79a952f/pkg/ml/nn/model.go#L35
 }
 
 const Epsilon = 0.00001
