@@ -8,11 +8,10 @@ import (
 
 func TestLoadData(t *testing.T) {
 	params := DataParameters{
-		DataFile:                 "../../datasets/breast_cancer/breast-cancer.train",
-		TargetColumn:             "Class",
-		CategoricalColumns:       NewSet("Age", "Menopause", "Tumor-size", "Inv-nodes", "Node-caps", "Breast", "Breast-quad", "Irradiat"),
-		BatchSize:                10,
-		CategoricalEmbeddingSize: 2,
+		DataFile:           "../../datasets/breast_cancer/breast-cancer.train",
+		TargetColumn:       "Class",
+		CategoricalColumns: NewSet("Age", "Menopause", "Tumor-size", "Inv-nodes", "Node-caps", "Breast", "Breast-quad", "Irradiat"),
+		BatchSize:          10,
 	}
 
 	metaData, data, dataErrors, err := LoadData(params, nil)
@@ -22,8 +21,8 @@ func TestLoadData(t *testing.T) {
 	require.Equal(t, 0, len(dataErrors))
 
 	d := data[0]
-	require.Equal(t, 17, d.Features[0].Rows())
-	require.Equal(t, 8, len(d.CategoricalFeatures[0]))
+	require.Equal(t, 1, d[0].ContinuousFeatures.Rows())
+	require.Equal(t, 8, len(d[0].CategoricalFeatures))
 
 	params.DataFile = "../../datasets/breast_cancer/breast-cancer.test"
 	testMetaData, data, dataErrors, err := LoadData(params, metaData)

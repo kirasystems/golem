@@ -35,11 +35,10 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 	rndGen := rand.NewLockedRand(trainingParams.RndSeed)
 
 	metaData, data, dataErrors, err := io.LoadData(io.DataParameters{
-		DataFile:                 trainFile,
-		TargetColumn:             targetColumn,
-		CategoricalColumns:       io.Set{},
-		BatchSize:                trainingParams.BatchSize,
-		CategoricalEmbeddingSize: trainingParams.CategoricalEmbeddingSize}, nil)
+		DataFile:           trainFile,
+		TargetColumn:       targetColumn,
+		CategoricalColumns: io.Set{},
+		BatchSize:          trainingParams.BatchSize}, nil)
 
 	if err != nil {
 		log.Fatalf("Error reading training data: %s", err)
@@ -65,7 +64,7 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 	for epoch := 0; epoch < trainingParams.NumEpochs; epoch++ {
 		t.optimizer.IncEpoch()
 		for i, batch := range data {
-			totalLoss, classificationLoss, sparsityLoss := t.trainBatch(&batch)
+			totalLoss, classificationLoss, sparsityLoss := t.trainBatch(batch)
 			t.optimizer.Optimize()
 			if i%t.params.ReportInterval == 0 {
 				log.Printf("Epoch %d batch %d loss %.5f | %.5f | %.5f \n", epoch, i, totalLoss, classificationLoss, sparsityLoss)
@@ -91,29 +90,29 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 
 }
 
-func (t *Trainer) trainBatch(batch *io.DataBatch) (float64, float64, float64) {
+func (t *Trainer) trainBatch(batch io.DataBatch) (float64, float64, float64) {
 	t.optimizer.IncBatch()
 
 	g := ag.NewGraph(ag.Rand(rand.NewLockedRand(t.params.RndSeed))) // TODO: we might use the same random generator among the batches until we run them concurrently
 	defer g.Clear()
-	input := make([]ag.Node, len(batch.Features))
+	input := make([]ag.Node, len(batch))
 	//TODO: add support for categorical features
 	for i := range input {
-		input[i] = g.NewVariable(batch.Features[i], false)
+		input[i] = g.NewVariable(batch[i].ContinuousFeatures, false)
 	}
 	modelProc := t.model.NewProc(nn.Context{Graph: g, Mode: nn.Training}).(*model.TabNetProcessor)
 	logits := modelProc.Forward(input...)
 
 	var loss, classificationLoss, sparsityLoss ag.Node
-	for i := range batch.Targets {
-		exampleCrossEntropy := losses.CrossEntropy(g, logits[i], int(batch.Targets[i]))
+	for i := range batch {
+		exampleCrossEntropy := losses.CrossEntropy(g, logits[i], int(batch[i].Target))
 		classificationLoss = g.Add(classificationLoss, exampleCrossEntropy)
 		sparsityLoss = g.Add(sparsityLoss, modelProc.AttentionEntropy[i])
 		exampleAttentionEntropy := g.Mul(modelProc.AttentionEntropy[i], g.Constant(t.model.SparsityLossWeight))
 		exampleLoss := g.Add(exampleCrossEntropy, exampleAttentionEntropy)
 		loss = g.Add(loss, exampleLoss)
 	}
-	batchSize := g.NewScalar(float64(len(batch.Targets)))
+	batchSize := g.NewScalar(float64(len(batch)))
 	loss = g.Div(loss, batchSize)
 	classificationLoss = g.Div(classificationLoss, batchSize)
 	sparsityLoss = g.Div(sparsityLoss, batchSize)

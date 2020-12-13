@@ -12,20 +12,30 @@ import (
 	"github.com/nlpodyssey/spago/pkg/mat"
 )
 
-type DataBatch struct {
-	// Features contain both the continuous features and the current learned
-	// representation of the categorical features
-	Features []mat.Matrix
+// DataInstance holds data for a single data point.
+type DataRecord struct {
 
-	// CategoricalFeatures contain the indexes of the categorical features
-	CategoricalFeatures [][]int
+	// ContinuousFeatures contains the raw value of the continuous features
+	// these are indexed according to the mapping from continuous feature to index
+	// specified in the dataset metadata
+	ContinuousFeatures mat.Matrix
 
-	// Targets contain the index or value of the target
-	Targets []float64
+	// CategoricalFeatures contain the category values for the categorical features.
+	// Each column of the slice corresponds to a categorical feature. The mapping between
+	// column indices and feature is specified in the dataset metadata
+	CategoricalFeatures []int
+
+	// Target contains the target value.
+	// Float64 is used to represent valus for both continuous and categorical target types.
+
+	Target float64
 }
 
-func (d *DataBatch) Size() int {
-	return len(d.Targets)
+// DataBatch holds a minibatch of data.
+type DataBatch []DataRecord
+
+func (d DataBatch) Size() int {
+	return len(d)
 }
 
 type void struct{}
@@ -43,11 +53,10 @@ func NewSet(values ...string) Set {
 }
 
 type DataParameters struct {
-	DataFile                 string
-	TargetColumn             string
-	CategoricalColumns       Set
-	BatchSize                int
-	CategoricalEmbeddingSize int
+	DataFile           string
+	TargetColumn       string
+	CategoricalColumns Set
+	BatchSize          int
 }
 
 type DataError struct {
@@ -78,7 +87,6 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []Da
 		metaData = model.NewMetadata()
 		newMetadata = true
 		metaData.Columns = record
-		metaData.CategoricalEmbeddingSize = p.CategoricalEmbeddingSize
 		if err := setTargetColumn(p, metaData); err != nil {
 			return nil, nil, nil, err
 		}
@@ -86,12 +94,14 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []Da
 	}
 
 	var result []DataBatch
-	currentBatch := DataBatch{}
+	currentBatch := make(DataBatch, 0, p.BatchSize)
 	currentLine := 0
-	featureSize := computeFeatureSize(metaData)
 
 	for record, err = reader.Read(); err == nil; record, err = reader.Read() {
 		//TODO: add support for continuous targets
+
+		dataRecord := DataRecord{}
+
 		targetValue, err := parseTarget(newMetadata, metaData, record[metaData.TargetColumn])
 		if err != nil {
 			errors = append(errors, DataError{
@@ -101,10 +111,10 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []Da
 			continue
 		}
 
-		currentBatch.Targets = append(currentBatch.Targets, targetValue)
-		features := mat.NewEmptyVecDense(featureSize)
+		dataRecord.Target = targetValue
+		dataRecord.ContinuousFeatures = mat.NewEmptyVecDense(metaData.ContinuousFeaturesMap.Size())
 
-		err = parseContinuousFeatures(metaData, record, features)
+		err = parseContinuousFeatures(metaData, record, dataRecord.ContinuousFeatures)
 		if err != nil {
 			errors = append(errors, DataError{
 				Line:  currentLine,
@@ -113,7 +123,7 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []Da
 			continue
 		}
 
-		categoricalFeatures, err := parseCategoricalFeatures(metaData, newMetadata, record)
+		dataRecord.CategoricalFeatures, err = parseCategoricalFeatures(metaData, newMetadata, record)
 		if err != nil {
 			errors = append(errors, DataError{
 				Line:  currentLine,
@@ -121,18 +131,15 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []Da
 			})
 			continue
 		}
-
-		currentBatch.Features = append(currentBatch.Features, features)
-		currentBatch.CategoricalFeatures = append(currentBatch.CategoricalFeatures, categoricalFeatures)
-
-		if len(currentBatch.Targets) == p.BatchSize {
+		currentBatch = append(currentBatch, dataRecord)
+		if len(currentBatch) == p.BatchSize {
 			result = append(result, currentBatch)
-			currentBatch = DataBatch{}
+			currentBatch = make(DataBatch, 0, p.BatchSize)
 		}
 		currentLine++
 	}
 
-	if len(currentBatch.Targets) > 0 {
+	if len(currentBatch) > 0 {
 		result = append(result, currentBatch)
 	}
 
@@ -166,7 +173,7 @@ func parseCategoricalFeatures(metaData *model.Metadata, newMetadata bool, record
 	return categoricalFeatures, nil
 }
 
-func parseContinuousFeatures(metaData *model.Metadata, record []string, features *mat.Dense) error {
+func parseContinuousFeatures(metaData *model.Metadata, record []string, features mat.Matrix) error {
 	for column, index := range metaData.ContinuousFeaturesMap.ColumnToIndex {
 		value, err := strconv.ParseFloat(record[column], 64)
 		if err != nil {
@@ -193,16 +200,17 @@ func parseTarget(newMetadata bool, metaData *model.Metadata, target string) (flo
 }
 
 func buildFeatureIndex(p DataParameters, metaData *model.Metadata) {
-	featureIndex := 0
+	continuousFeatureIndex := 0
+	categoricalFeatureIndex := 0
 	for i, col := range metaData.Columns {
 		_, isCategorical := p.CategoricalColumns[col]
 		if i != metaData.TargetColumn {
 			if !isCategorical {
-				metaData.ContinuousFeaturesMap.Set(i, featureIndex)
-				featureIndex++
+				metaData.ContinuousFeaturesMap.Set(i, continuousFeatureIndex)
+				continuousFeatureIndex++
 			} else {
-				metaData.CategoricalFeaturesMap.Set(i, featureIndex)
-				featureIndex += p.CategoricalEmbeddingSize
+				metaData.CategoricalFeaturesMap.Set(i, categoricalFeatureIndex)
+				categoricalFeatureIndex++
 			}
 		}
 	}
@@ -216,11 +224,6 @@ func setTargetColumn(p DataParameters, metaData *model.Metadata) error {
 		}
 	}
 	return fmt.Errorf("target column %s not found in data header", p.TargetColumn)
-}
-
-func computeFeatureSize(metaData *model.Metadata) int {
-	return metaData.ContinuousFeaturesMap.Size() + metaData.CategoricalEmbeddingSize*metaData.CategoricalFeaturesMap.Size()
-
 }
 
 func SaveModel(model *model.Model, writer io.Writer) error {

@@ -1,12 +1,13 @@
 package featuretransformer
 
 import (
+	"math"
+
 	"github.com/nlpodyssey/spago/pkg/mat/rand"
 	"github.com/nlpodyssey/spago/pkg/ml/ag"
 	"github.com/nlpodyssey/spago/pkg/ml/nn"
 	"github.com/nlpodyssey/spago/pkg/ml/nn/linear"
 	"github.com/nlpodyssey/spago/pkg/ml/nn/normalization/batchnorm"
-	"math"
 )
 
 var (
@@ -14,7 +15,7 @@ var (
 	_ nn.Processor = &Processor{}
 )
 
-// Features Transformer Block
+// ContinuousFeatures Transformer Block
 type Model struct {
 	Layer1 *Layer
 	Layer2 *Layer

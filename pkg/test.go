@@ -35,11 +35,10 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 	}
 
 	_, data, dataErrors, err := io.LoadData(io.DataParameters{
-		DataFile:                 inputFileName,
-		TargetColumn:             model.MetaData.Columns[model.MetaData.TargetColumn],
-		CategoricalColumns:       nil,
-		BatchSize:                1,
-		CategoricalEmbeddingSize: model.MetaData.CategoricalEmbeddingSize,
+		DataFile:           inputFileName,
+		TargetColumn:       model.MetaData.Columns[model.MetaData.TargetColumn],
+		CategoricalColumns: nil,
+		BatchSize:          1,
 	}, model.MetaData)
 	if err != nil {
 		return fmt.Errorf("error loading data from %s: %w", inputFileName, err)
@@ -147,8 +146,8 @@ func predict(g *ag.Graph, model *model.Model, data io.DataBatch) []prediction {
 
 	input := make([]ag.Node, data.Size())
 	//TODO: add support for categorical features
-	for i := range data.Features {
-		input[i] = g.NewVariable(data.Features[i], false)
+	for i := range data {
+		input[i] = g.NewVariable(data[i].ContinuousFeatures, false)
 	}
 
 	proc := model.TabNet.NewProc(nn.Context{Graph: g, Mode: nn.Inference})
@@ -156,7 +155,7 @@ func predict(g *ag.Graph, model *model.Model, data io.DataBatch) []prediction {
 	for i := range logits {
 		class, logit := argmax(logits[i].Value().Data())
 		className := model.MetaData.TargetMap.IndexToName[class]
-		label := model.MetaData.TargetMap.IndexToName[int(data.Targets[i])]
+		label := model.MetaData.TargetMap.IndexToName[int(data[i].Target)]
 		result[i] = prediction{
 			predictedClass: className,
 			label:          label,
