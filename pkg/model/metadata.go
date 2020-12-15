@@ -11,14 +11,14 @@ func (f *NameMap) Set(name string, index int) {
 	f.IndexToName[index] = name
 }
 
-func (f *NameMap) ValueFor(name string) int {
+func (f *NameMap) ValueFor(name string) (int, bool) {
 	value, ok := f.NameToIndex[name]
 	if !ok {
 		value = len(f.NameToIndex)
 		f.NameToIndex[name] = value
 		f.IndexToName[value] = name
 	}
-	return value
+	return value, !ok
 }
 func (f *NameMap) Size() int {
 	return len(f.IndexToName)
@@ -62,6 +62,33 @@ func NewColumnMap() *ColumnMap {
 	}
 }
 
+type CategoricalValue struct {
+	// Column identifies the column corresponding to this value in the dataset
+	Column int
+	// Value is the plain value of this categorical value
+	Value string
+}
+
+type CategoricalValuesMap struct {
+	ValueToIndex map[CategoricalValue]int
+	IndexToValue map[int]CategoricalValue
+}
+
+func (c *CategoricalValuesMap) ValueFor(value CategoricalValue) int {
+	result, ok := c.ValueToIndex[value]
+	if !ok {
+		result = len(c.ValueToIndex)
+		c.ValueToIndex[value] = result
+		c.IndexToValue[result] = value
+	}
+	return result
+
+}
+
+func (c *CategoricalValuesMap) Size() int {
+	return len(c.ValueToIndex)
+}
+
 type Metadata struct {
 	Columns []string
 
@@ -71,26 +98,30 @@ type Metadata struct {
 	// CategoricalFeaturesMap maps a data row column index to the categorical features index
 	CategoricalFeaturesMap *ColumnMap
 
-	// CategoricalFeaturesValuesMap maps a given categorical column to a map from values to indexes
-	CategoricalFeaturesValuesMap map[int]*NameMap
+	// CategoricalValuesMap maps a given categorical column to a map from values to indexes
+	CategoricalValuesMap *CategoricalValuesMap
 
 	// TargetColumn points to the column in the data row that contains the prediction target
 	TargetColumn int
 
 	// TargetMap contains a mapping of target category names to target category indexes
 	TargetMap *NameMap
-
-	// CategoricalEmbeddingSize is the size of each categorical feature embedding
-	CategoricalEmbeddingSize int
 }
 
 func NewMetadata() *Metadata {
 	return &Metadata{
-		Columns:                      nil,
-		ContinuousFeaturesMap:        NewColumnMap(),
-		CategoricalFeaturesMap:       NewColumnMap(),
-		CategoricalFeaturesValuesMap: map[int]*NameMap{},
-		TargetMap:                    NewNameMap(),
+		Columns:                nil,
+		ContinuousFeaturesMap:  NewColumnMap(),
+		CategoricalFeaturesMap: NewColumnMap(),
+		CategoricalValuesMap:   NewCategoricalValuesMap(),
+		TargetMap:              NewNameMap(),
+	}
+}
+
+func NewCategoricalValuesMap() *CategoricalValuesMap {
+	return &CategoricalValuesMap{
+		ValueToIndex: map[CategoricalValue]int{},
+		IndexToValue: map[int]CategoricalValue{},
 	}
 }
 
@@ -103,6 +134,7 @@ func (d *Metadata) ParseCategoricalTarget(value string) (float64, bool) {
 	return float64(index), ok
 }
 func (d *Metadata) ParseOrAddCategoricalTarget(value string) float64 {
-	return float64(d.TargetMap.ValueFor(value))
+	target, _ := d.TargetMap.ValueFor(value)
+	return float64(target)
 
 }

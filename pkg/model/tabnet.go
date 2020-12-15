@@ -1,6 +1,8 @@
 package model
 
 import (
+	"golem/pkg/model/featuretransformer"
+
 	"github.com/nlpodyssey/spago/pkg/mat"
 	"github.com/nlpodyssey/spago/pkg/mat/rand"
 	"github.com/nlpodyssey/spago/pkg/ml/ag"
@@ -8,7 +10,6 @@ import (
 	"github.com/nlpodyssey/spago/pkg/ml/nn"
 	"github.com/nlpodyssey/spago/pkg/ml/nn/linear"
 	"github.com/nlpodyssey/spago/pkg/ml/nn/normalization/batchnorm"
-	"golem/pkg/model/featuretransformer"
 )
 
 var (
@@ -26,43 +27,53 @@ type TabNet struct {
 	AttentionTransformer         *linear.Model
 	AttentionBatchNorm           *batchnorm.Model
 	OutputLayer                  *linear.Model
-	CategoricalFeatureEmbeddings map[string]*nn.Param
-	// ^^^^^
-	// Yeah, the categorical embeddings et the end are params of the model, that will be optimized end-to-end during training!
-	//
-	// So we need to keep the structure almost flat due to current limits on a method as ugly as it is important in spaGO like the `forEachParam()`:
-	// https://github.com/nlpodyssey/spago/blob/622a04e24a0784ecc02a1181b517f898c79a952f/pkg/ml/nn/model.go#L35
+	CategoricalFeatureEmbeddings []*nn.Param
 }
 
 const Epsilon = 0.00001
 
 type TabNetConfig struct {
-	NumDecisionSteps   int
-	NumColumns         int
-	FeatureDimension   int
-	OutputDimension    int
-	RelaxationFactor   float64
-	BatchMomentum      float64
-	VirtualBatchSize   int
-	SparsityLossWeight float64
+	NumDecisionSteps              int
+	NumColumns                    int
+	IntermediateFeatureDimension  int
+	OutputDimension               int
+	CategoricalEmbeddingDimension int
+	NumCategoricalEmbeddings      int
+	RelaxationFactor              float64
+	BatchMomentum                 float64
+	VirtualBatchSize              int
+	SparsityLossWeight            float64
 }
 
 func NewTabNet(config TabNetConfig) *TabNet {
-	stepFeatureTransformers := make([]*featuretransformer.Model, config.NumDecisionSteps)
-	for i := range stepFeatureTransformers {
-		stepFeatureTransformers[i] = featuretransformer.New(config.FeatureDimension, config.BatchMomentum)
-	}
+
 	return &TabNet{
-		TabNetConfig:             config,
-		FeatureBatchNorm:         batchnorm.NewWithMomentum(config.NumColumns, config.BatchMomentum),
-		SharedFeatureTransformer: featuretransformer.New(config.FeatureDimension, config.BatchMomentum),
-		StepFeatureTransformers:  stepFeatureTransformers,
-		AttentionTransformer:     linear.New(config.FeatureDimension, config.NumColumns, linear.BiasGrad(false)),
-		AttentionBatchNorm:       batchnorm.NewWithMomentum(config.NumColumns, config.BatchMomentum),
-		OutputLayer:              linear.New(config.FeatureDimension, config.OutputDimension, linear.BiasGrad(false)),
+		TabNetConfig:                 config,
+		FeatureBatchNorm:             batchnorm.NewWithMomentum(config.NumColumns, config.BatchMomentum),
+		SharedFeatureTransformer:     featuretransformer.New(config.NumColumns, config.IntermediateFeatureDimension, config.BatchMomentum),
+		StepFeatureTransformers:      newStepFeatureTransformers(config),
+		AttentionTransformer:         linear.New(config.IntermediateFeatureDimension, config.NumColumns, linear.BiasGrad(false)),
+		AttentionBatchNorm:           batchnorm.NewWithMomentum(config.NumColumns, config.BatchMomentum),
+		OutputLayer:                  linear.New(config.IntermediateFeatureDimension, config.OutputDimension, linear.BiasGrad(false)),
+		CategoricalFeatureEmbeddings: newCategoricalFeatureEmbeddings(config),
 	}
 }
 
+func newCategoricalFeatureEmbeddings(config TabNetConfig) []*nn.Param {
+	embeddings := make([]*nn.Param, config.NumCategoricalEmbeddings)
+	for i := range embeddings {
+		embeddings[i] = nn.NewParam(mat.NewEmptyVecDense(config.CategoricalEmbeddingDimension), nn.RequiresGrad(true))
+	}
+	return embeddings
+}
+
+func newStepFeatureTransformers(config TabNetConfig) []*featuretransformer.Model {
+	stepFeatureTransformers := make([]*featuretransformer.Model, config.NumDecisionSteps)
+	for i := range stepFeatureTransformers {
+		stepFeatureTransformers[i] = featuretransformer.New(config.IntermediateFeatureDimension, config.IntermediateFeatureDimension, config.BatchMomentum)
+	}
+	return stepFeatureTransformers
+}
 func (m *TabNet) Init(generator *rand.LockedRand) {
 	m.SharedFeatureTransformer.Init(generator)
 	for _, t := range m.StepFeatureTransformers {
@@ -71,6 +82,10 @@ func (m *TabNet) Init(generator *rand.LockedRand) {
 	gain := initializers.Gain(ag.OpIdentity)
 	initializers.XavierUniform(m.AttentionTransformer.W.Value(), gain, generator)
 	initializers.XavierUniform(m.OutputLayer.W.Value(), gain, generator)
+
+	for _, p := range m.CategoricalFeatureEmbeddings {
+		initializers.Uniform(p.Value(), 0.1, 0.1, generator)
+	}
 }
 
 type TabNetProcessor struct {

@@ -15,9 +15,10 @@ var (
 )
 
 type Layer struct {
-	InputDimension int
-	DenseLayer     *linear.Model
-	BatchNormLayer *batchnorm.Model
+	InputDimension               int
+	IntermediateFeatureDimension int
+	DenseLayer                   *linear.Model
+	BatchNormLayer               *batchnorm.Model
 }
 
 func (m *Layer) Init(generator *rand.LockedRand) {
@@ -26,9 +27,10 @@ func (m *Layer) Init(generator *rand.LockedRand) {
 
 type LayerProcessor struct {
 	nn.BaseProcessor
-	inputDimension      int
-	denseLayerProcessor nn.Processor
-	batchNormProcessor  nn.Processor
+	inputDimension               int
+	intermediateFeatureDimension int
+	denseLayerProcessor          nn.Processor
+	batchNormProcessor           nn.Processor
 }
 
 func (m *Layer) NewProc(ctx nn.Context) nn.Processor {
@@ -39,9 +41,10 @@ func (m *Layer) NewProc(ctx nn.Context) nn.Processor {
 			Graph:             ctx.Graph,
 			FullSeqProcessing: true,
 		},
-		inputDimension:      m.InputDimension,
-		denseLayerProcessor: m.DenseLayer.NewProc(ctx),
-		batchNormProcessor:  m.BatchNormLayer.NewProc(ctx),
+		inputDimension:               m.InputDimension,
+		intermediateFeatureDimension: m.IntermediateFeatureDimension,
+		denseLayerProcessor:          m.DenseLayer.NewProc(ctx),
+		batchNormProcessor:           m.BatchNormLayer.NewProc(ctx),
 	}
 }
 
@@ -50,7 +53,7 @@ func (p *LayerProcessor) Forward(xs ...ag.Node) []ag.Node {
 	transformedInput = p.batchNormProcessor.Forward(transformedInput...)
 	out := make([]ag.Node, len(xs))
 	for i := range out {
-		out[i] = glu(p.Graph, 2*p.inputDimension, transformedInput[i])
+		out[i] = glu(p.Graph, 2*p.intermediateFeatureDimension, transformedInput[i])
 	}
 	return out
 }

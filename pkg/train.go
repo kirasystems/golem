@@ -15,12 +15,12 @@ import (
 )
 
 type TrainingParameters struct {
-	BatchSize                int
-	CategoricalEmbeddingSize int
-	NumEpochs                int
-	LearningRate             float64
-	ReportInterval           int
-	RndSeed                  uint64
+	BatchSize          int
+	NumEpochs          int
+	LearningRate       float64
+	ReportInterval     int
+	RndSeed            uint64
+	CategoricalColumns []string
 }
 
 type Trainer struct {
@@ -37,7 +37,7 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 	metaData, data, dataErrors, err := io.LoadData(io.DataParameters{
 		DataFile:           trainFile,
 		TargetColumn:       targetColumn,
-		CategoricalColumns: io.Set{},
+		CategoricalColumns: io.NewSet(trainingParams.CategoricalColumns...),
 		BatchSize:          trainingParams.BatchSize}, nil)
 
 	if err != nil {
@@ -49,8 +49,10 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 		log.Fatalf("No data to train")
 	}
 
-	//Overwrite number of feature columns as this is only known after parsing the dataset
+	//Overwrite values that are  only known after parsing the dataset
 	config.NumColumns = metaData.FeatureCount()
+	config.NumCategoricalEmbeddings = len(metaData.CategoricalValuesMap.ValueToIndex)
+
 	t.model = model.NewTabNet(config)
 	t.model.Init(rndGen)
 
@@ -88,6 +90,11 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 		log.Printf("Error saving model to %s: %s", outputFileName, err)
 	}
 
+	err = testInternal(&m, data, "")
+	if err != nil {
+		log.Fatalf(err.Error())
+	}
+
 }
 
 func (t *Trainer) trainBatch(batch io.DataBatch) (float64, float64, float64) {
@@ -95,11 +102,7 @@ func (t *Trainer) trainBatch(batch io.DataBatch) (float64, float64, float64) {
 
 	g := ag.NewGraph(ag.Rand(rand.NewLockedRand(t.params.RndSeed))) // TODO: we might use the same random generator among the batches until we run them concurrently
 	defer g.Clear()
-	input := make([]ag.Node, len(batch))
-	//TODO: add support for categorical features
-	for i := range input {
-		input[i] = g.NewVariable(batch[i].ContinuousFeatures, false)
-	}
+	input := createInputNodes(batch, g, t.model)
 	modelProc := t.model.NewProc(nn.Context{Graph: g, Mode: nn.Training}).(*model.TabNetProcessor)
 	logits := modelProc.Forward(input...)
 
@@ -119,4 +122,15 @@ func (t *Trainer) trainBatch(batch io.DataBatch) (float64, float64, float64) {
 
 	g.Backward(loss)
 	return loss.ScalarValue(), classificationLoss.ScalarValue(), sparsityLoss.ScalarValue()
+}
+
+func createInputNodes(batch io.DataBatch, g *ag.Graph, model *model.TabNet) []ag.Node {
+	input := make([]ag.Node, len(batch))
+	for i := range input {
+		input[i] = g.NewVariable(batch[i].ContinuousFeatures, false)
+		for _, index := range batch[i].CategoricalFeatures {
+			input[i] = g.Concat(input[i], g.NewWrap(model.CategoricalFeatureEmbeddings[index]))
+		}
+	}
+	return input
 }

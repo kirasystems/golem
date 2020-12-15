@@ -2,11 +2,16 @@ package pkg
 
 import (
 	"fmt"
-	"golem/pkg/io"
-	"golem/pkg/model"
+
 	gio "io"
 	"log"
 	"sort"
+
+	"github.com/nlpodyssey/spago/pkg/mat"
+	"github.com/nlpodyssey/spago/pkg/ml/losses"
+
+	"golem/pkg/io"
+	"golem/pkg/model"
 
 	"os"
 
@@ -33,7 +38,6 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 	if err != nil {
 		return fmt.Errorf("error loading model from file %s: %w", modelFileName, err)
 	}
-
 	_, data, dataErrors, err := io.LoadData(io.DataParameters{
 		DataFile:           inputFileName,
 		TargetColumn:       model.MetaData.Columns[model.MetaData.TargetColumn],
@@ -43,11 +47,14 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 	if err != nil {
 		return fmt.Errorf("error loading data from %s: %w", inputFileName, err)
 	}
-
 	printDataErrors(dataErrors)
 	if len(data) == 0 {
 		log.Fatalf("No data to test")
 	}
+	return testInternal(model, data, outputFileName)
+}
+func testInternal(model *model.Model, data []io.DataBatch, outputFileName string) error {
+
 	var outputWriter gio.Writer
 	if outputFileName != "" {
 		outputFile, err := os.Create(outputFileName)
@@ -64,10 +71,17 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 
 	g := ag.NewGraph(ag.Rand(rand.NewLockedRand(42)))
 
+	loss := 0.0
+	numLosses := 0
+
 	for _, d := range data {
 		predictions := predict(g, model, d)
 		for _, prediction := range predictions {
-			fmt.Fprintf(outputWriter, "%s,%s,%.5f\n", prediction.label, prediction.predictedClass, prediction.logit)
+
+			loss += losses.CrossEntropy(g, g.NewVariable(prediction.logits, false), int(prediction.labelValue)).ScalarValue()
+			numLosses++
+
+			fmt.Fprintf(outputWriter, "%s,%s,%.5f\n", prediction.label, prediction.predictedClass, prediction.maxLogit)
 
 			labelClassMetrics, ok := metrics[prediction.label]
 			if !ok {
@@ -77,7 +91,7 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 			predictedClassMetrics, ok := metrics[prediction.predictedClass]
 			if !ok {
 				predictedClassMetrics = stats.NewMetricCounter()
-				metrics[prediction.predictedClass] = labelClassMetrics
+				metrics[prediction.predictedClass] = predictedClassMetrics
 			}
 
 			if prediction.label == prediction.predictedClass {
@@ -90,6 +104,7 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 		}
 
 	}
+	loss = loss / float64(numLosses)
 
 	// Sort class names for deterministic output
 	sortedClasses := sortClasses(metrics)
@@ -101,7 +116,7 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 	}
 
 	microF1, macroF1 := computeOverallF1(metrics)
-	log.Printf("Macro F1: %.3f - Micro F1: %.3f\n", macroF1, microF1)
+	log.Printf("Macro F1: %.3f - Micro F1: %.3f - Loss %.5f\n", macroF1, microF1, loss)
 	return nil
 }
 
@@ -136,19 +151,17 @@ func sortClasses(metrics map[string]*stats.ClassMetrics) []string {
 type prediction struct {
 	predictedClass string
 	label          string
-	logit          float64
+	labelValue     float64
+	logits         mat.Matrix
+	maxLogit       float64
 }
 
 func predict(g *ag.Graph, model *model.Model, data io.DataBatch) []prediction {
 
-	//TODO: add support cor continuous outputs
+	//TODO: add support for continuous outputs
 	result := make([]prediction, data.Size())
 
-	input := make([]ag.Node, data.Size())
-	//TODO: add support for categorical features
-	for i := range data {
-		input[i] = g.NewVariable(data[i].ContinuousFeatures, false)
-	}
+	input := createInputNodes(data, g, model.TabNet)
 
 	proc := model.TabNet.NewProc(nn.Context{Graph: g, Mode: nn.Inference})
 	logits := proc.Forward(input...)
@@ -159,7 +172,9 @@ func predict(g *ag.Graph, model *model.Model, data io.DataBatch) []prediction {
 		result[i] = prediction{
 			predictedClass: className,
 			label:          label,
-			logit:          logit,
+			labelValue:     data[i].Target,
+			logits:         logits[i].Value(),
+			maxLogit:       logit,
 		}
 	}
 	g.Clear()

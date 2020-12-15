@@ -31,15 +31,18 @@ func TrainCommand() *cobra.Command {
 	cmd.Flags().Float64VarP(&trainingParameters.LearningRate, "learning-rate", "l", 0.01, "learning rate")
 	cmd.Flags().IntVarP(&trainingParameters.ReportInterval, "report-interval", "r", 10, "loss report interval")
 	cmd.Flags().IntVarP(&trainingParameters.NumEpochs, "num-epochs", "n", 10, "number of epochs to train")
-	cmd.Flags().IntVarP(&trainingParameters.CategoricalEmbeddingSize, "categorical-embedding-size", "c", 1, "size of categorical embeddings")
 	cmd.Flags().Uint64VarP(&trainingParameters.RndSeed, "random-seed", "x", 42, "random seed")
+	cmd.Flags().StringSliceVarP(&trainingParameters.CategoricalColumns, "categorical-columns", "", nil, "list of columns holding categorical data")
+
+	cmd.Flags().IntVarP(&modelParameters.CategoricalEmbeddingDimension, "categorical-embedding-size", "c", 1, "size of categorical embeddings")
 	cmd.Flags().IntVarP(&modelParameters.NumDecisionSteps, "num-decision-steps", "s", 2, "number of decision steps")
-	cmd.Flags().IntVarP(&modelParameters.FeatureDimension, "feature-dimension", "f", 4, "feature dimension")
+	cmd.Flags().IntVarP(&modelParameters.IntermediateFeatureDimension, "feature-dimension", "f", 4, "feature dimension")
 	cmd.Flags().IntVarP(&modelParameters.OutputDimension, "output-dimension", "k", 4, "output dimension")
 	cmd.Flags().Float64VarP(&modelParameters.RelaxationFactor, "relaxation-factor", "g", 1.5, "relaxation factor")
 	cmd.Flags().Float64VarP(&modelParameters.BatchMomentum, "batch-momentum", "", 0.9, "batch momentum")
-	cmd.Flags().StringVarP(&targetColumn, "target-column", "t", "", "target column")
 	cmd.Flags().Float64VarP(&modelParameters.SparsityLossWeight, "sparsity-loss-weight", "", 0.0001, "weight of the sparsity loss in total loss")
+
+	cmd.Flags().StringVarP(&targetColumn, "target-column", "t", "", "target column")
 
 	_ = cmd.MarkFlagRequired("train-file")
 	_ = cmd.MarkFlagRequired("output-file")

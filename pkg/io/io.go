@@ -147,28 +147,23 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []Da
 }
 
 func parseCategoricalFeatures(metaData *model.Metadata, newMetadata bool, record []string) ([]int, error) {
-	categoricalFeatures := make([]int, 0, metaData.CategoricalFeaturesMap.Size())
+	categoricalFeatures := make([]int, metaData.CategoricalFeaturesMap.Size())
 	for column, index := range metaData.CategoricalFeaturesMap.ColumnToIndex {
-		categoryNameMap, ok := metaData.CategoricalFeaturesValuesMap[index]
-		if !ok {
-			if newMetadata {
-				categoryNameMap = model.NewNameMap()
-				metaData.CategoricalFeaturesValuesMap[index] = categoryNameMap
-			} else {
-				return nil, fmt.Errorf("unknown categorical attribute %s (should not happen!)", metaData.Columns[column])
-			}
-
+		categoryValue := model.CategoricalValue{
+			Column: column,
+			Value:  record[column],
 		}
-		categoryValue := 0
+		valueIndex := 0
 		if newMetadata {
-			categoryValue = categoryNameMap.ValueFor(record[column])
+			valueIndex = metaData.CategoricalValuesMap.ValueFor(categoryValue)
 		} else {
-			categoryValue, ok = categoryNameMap.NameToIndex[record[column]]
+			ok := false
+			valueIndex, ok = metaData.CategoricalValuesMap.ValueToIndex[categoryValue]
 			if !ok {
 				return nil, fmt.Errorf("unknown value %s for categorical attribute %s", metaData.Columns[column], record[column])
 			}
 		}
-		categoricalFeatures = append(categoricalFeatures, categoryValue)
+		categoricalFeatures[index] = valueIndex
 	}
 	return categoricalFeatures, nil
 }

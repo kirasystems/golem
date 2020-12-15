@@ -21,17 +21,19 @@ type Model struct {
 	Layer2 *Layer
 }
 
-func New(featureDimension int, batchMomentum float64) *Model {
+func New(numInputFeatures, featureDimension int, batchMomentum float64) *Model {
 	return &Model{
 		Layer1: &Layer{
-			InputDimension: featureDimension,
-			DenseLayer:     linear.New(featureDimension, 2*featureDimension, linear.BiasGrad(false)),
-			BatchNormLayer: batchnorm.NewWithMomentum(2*featureDimension, batchMomentum),
+			InputDimension:               numInputFeatures,
+			IntermediateFeatureDimension: featureDimension,
+			DenseLayer:                   linear.New(numInputFeatures, 2*featureDimension, linear.BiasGrad(false)),
+			BatchNormLayer:               batchnorm.NewWithMomentum(2*featureDimension, batchMomentum),
 		},
 		Layer2: &Layer{
-			InputDimension: featureDimension,
-			DenseLayer:     linear.New(featureDimension, 2*featureDimension, linear.BiasGrad(false)),
-			BatchNormLayer: batchnorm.NewWithMomentum(2*featureDimension, batchMomentum),
+			InputDimension:               featureDimension,
+			IntermediateFeatureDimension: featureDimension,
+			DenseLayer:                   linear.New(featureDimension, 2*featureDimension, linear.BiasGrad(false)),
+			BatchNormLayer:               batchnorm.NewWithMomentum(2*featureDimension, batchMomentum),
 		},
 	}
 }
