@@ -17,8 +17,9 @@ var (
 type Layer struct {
 	InputDimension               int
 	IntermediateFeatureDimension int
+	NumSteps                     int
 	DenseLayer                   *linear.Model
-	BatchNormLayer               *batchnorm.Model
+	BatchNormLayer               []*batchnorm.Model
 }
 
 func (m *Layer) Init(generator *rand.LockedRand) {
@@ -30,7 +31,7 @@ type LayerProcessor struct {
 	inputDimension               int
 	intermediateFeatureDimension int
 	denseLayerProcessor          nn.Processor
-	batchNormProcessor           nn.Processor
+	batchNormProcessor           []nn.Processor
 }
 
 func (m *Layer) NewProc(ctx nn.Context) nn.Processor {
@@ -44,13 +45,25 @@ func (m *Layer) NewProc(ctx nn.Context) nn.Processor {
 		inputDimension:               m.InputDimension,
 		intermediateFeatureDimension: m.IntermediateFeatureDimension,
 		denseLayerProcessor:          m.DenseLayer.NewProc(ctx),
-		batchNormProcessor:           m.BatchNormLayer.NewProc(ctx),
+		batchNormProcessor:           createBatchNormProcessors(ctx, m),
 	}
 }
 
+func createBatchNormProcessors(ctx nn.Context, m *Layer) []nn.Processor {
+	result := make([]nn.Processor, m.NumSteps)
+	for i := range result {
+		result[i] = m.BatchNormLayer[i].NewProc(ctx)
+
+	}
+	return result
+}
+
 func (p *LayerProcessor) Forward(xs ...ag.Node) []ag.Node {
+	panic("Forward not implemented... please use Process instead")
+}
+func (p *LayerProcessor) Process(step int, xs ...ag.Node) []ag.Node {
 	transformedInput := p.denseLayerProcessor.Forward(xs...)
-	transformedInput = p.batchNormProcessor.Forward(transformedInput...)
+	transformedInput = p.batchNormProcessor[step].Forward(transformedInput...)
 	out := make([]ag.Node, len(xs))
 	for i := range out {
 		out[i] = glu(p.Graph, 2*p.intermediateFeatureDimension, transformedInput[i])

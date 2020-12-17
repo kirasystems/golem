@@ -105,7 +105,6 @@ func (t *Trainer) trainBatch(batch io.DataBatch) (float64, float64, float64) {
 	input := createInputNodes(batch, g, t.model)
 	modelProc := t.model.NewProc(nn.Context{Graph: g, Mode: nn.Training}).(*model.TabNetProcessor)
 	logits := modelProc.Forward(input...)
-
 	var loss, classificationLoss, sparsityLoss ag.Node
 	for i := range batch {
 		exampleCrossEntropy := losses.CrossEntropy(g, logits[i], int(batch[i].Target))

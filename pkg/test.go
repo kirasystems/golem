@@ -2,7 +2,6 @@ package pkg
 
 import (
 	"fmt"
-
 	gio "io"
 	"log"
 	"sort"
@@ -70,6 +69,7 @@ func testInternal(model *model.Model, data []io.DataBatch, outputFileName string
 	metrics := make(map[string]*stats.ClassMetrics)
 
 	g := ag.NewGraph(ag.Rand(rand.NewLockedRand(42)))
+	defer g.Clear()
 
 	loss := 0.0
 	numLosses := 0
@@ -77,7 +77,6 @@ func testInternal(model *model.Model, data []io.DataBatch, outputFileName string
 	for _, d := range data {
 		predictions := predict(g, model, d)
 		for _, prediction := range predictions {
-
 			loss += losses.CrossEntropy(g, g.NewVariable(prediction.logits, false), int(prediction.labelValue)).ScalarValue()
 			numLosses++
 
@@ -165,6 +164,7 @@ func predict(g *ag.Graph, model *model.Model, data io.DataBatch) []prediction {
 
 	proc := model.TabNet.NewProc(nn.Context{Graph: g, Mode: nn.Inference})
 	logits := proc.Forward(input...)
+
 	for i := range logits {
 		class, logit := argmax(logits[i].Value().Data())
 		className := model.MetaData.TargetMap.IndexToName[class]

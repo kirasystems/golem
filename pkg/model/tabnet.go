@@ -24,8 +24,8 @@ type TabNet struct {
 	FeatureBatchNorm             *batchnorm.Model
 	SharedFeatureTransformer     *featuretransformer.Model
 	StepFeatureTransformers      []*featuretransformer.Model
-	AttentionTransformer         *linear.Model
-	AttentionBatchNorm           *batchnorm.Model
+	AttentionTransformer         []*linear.Model
+	AttentionBatchNorm           []*batchnorm.Model
 	OutputLayer                  *linear.Model
 	CategoricalFeatureEmbeddings []*nn.Param
 }
@@ -50,13 +50,30 @@ func NewTabNet(config TabNetConfig) *TabNet {
 	return &TabNet{
 		TabNetConfig:                 config,
 		FeatureBatchNorm:             batchnorm.NewWithMomentum(config.NumColumns, config.BatchMomentum),
-		SharedFeatureTransformer:     featuretransformer.New(config.NumColumns, config.IntermediateFeatureDimension, config.BatchMomentum),
+		SharedFeatureTransformer:     featuretransformer.New(config.NumColumns, config.IntermediateFeatureDimension, config.NumDecisionSteps, config.BatchMomentum),
 		StepFeatureTransformers:      newStepFeatureTransformers(config),
-		AttentionTransformer:         linear.New(config.IntermediateFeatureDimension, config.NumColumns, linear.BiasGrad(false)),
-		AttentionBatchNorm:           batchnorm.NewWithMomentum(config.NumColumns, config.BatchMomentum),
+		AttentionTransformer:         createLinearTransformers(config),
+		AttentionBatchNorm:           createBatchNormModels(config),
 		OutputLayer:                  linear.New(config.IntermediateFeatureDimension, config.OutputDimension, linear.BiasGrad(false)),
 		CategoricalFeatureEmbeddings: newCategoricalFeatureEmbeddings(config),
 	}
+}
+
+func createBatchNormModels(config TabNetConfig) []*batchnorm.Model {
+	result := make([]*batchnorm.Model, config.NumDecisionSteps)
+	for i := range result {
+		result[i] = batchnorm.NewWithMomentum(config.NumColumns, config.BatchMomentum)
+	}
+	return result
+
+}
+
+func createLinearTransformers(config TabNetConfig) []*linear.Model {
+	result := make([]*linear.Model, config.NumDecisionSteps)
+	for i := range result {
+		result[i] = linear.New(config.IntermediateFeatureDimension, config.NumColumns, linear.BiasGrad(false))
+	}
+	return result
 }
 
 func newCategoricalFeatureEmbeddings(config TabNetConfig) []*nn.Param {
@@ -70,7 +87,7 @@ func newCategoricalFeatureEmbeddings(config TabNetConfig) []*nn.Param {
 func newStepFeatureTransformers(config TabNetConfig) []*featuretransformer.Model {
 	stepFeatureTransformers := make([]*featuretransformer.Model, config.NumDecisionSteps)
 	for i := range stepFeatureTransformers {
-		stepFeatureTransformers[i] = featuretransformer.New(config.IntermediateFeatureDimension, config.IntermediateFeatureDimension, config.BatchMomentum)
+		stepFeatureTransformers[i] = featuretransformer.New(config.IntermediateFeatureDimension, config.IntermediateFeatureDimension, 1, config.BatchMomentum)
 	}
 	return stepFeatureTransformers
 }
@@ -80,7 +97,9 @@ func (m *TabNet) Init(generator *rand.LockedRand) {
 		t.Init(generator)
 	}
 	gain := initializers.Gain(ag.OpIdentity)
-	initializers.XavierUniform(m.AttentionTransformer.W.Value(), gain, generator)
+	for _, transformer := range m.AttentionTransformer {
+		initializers.XavierUniform(transformer.W.Value(), gain, generator)
+	}
 	initializers.XavierUniform(m.OutputLayer.W.Value(), gain, generator)
 
 	for _, p := range m.CategoricalFeatureEmbeddings {
@@ -94,8 +113,8 @@ type TabNetProcessor struct {
 	featureBatchNormProcessor     *batchnorm.Processor
 	sharedTransformerProcessor    *featuretransformer.Processor
 	stepTransformerProcessors     []*featuretransformer.Processor
-	attentionTransformerProcessor *linear.Processor
-	attentionBatchNormProcessor   *batchnorm.Processor
+	attentionTransformerProcessor []*linear.Processor
+	attentionBatchNormProcessor   []*batchnorm.Processor
 	outputProcessor               *linear.Processor
 
 	AttentionEntropy []ag.Node // computed by forward
@@ -118,9 +137,25 @@ func (m *TabNet) NewProc(ctx nn.Context) nn.Processor {
 		sharedTransformerProcessor:    m.SharedFeatureTransformer.NewProcNoResidual(ctx).(*featuretransformer.Processor),
 		stepTransformerProcessors:     stepTransformerProcessors,
 		outputProcessor:               m.OutputLayer.NewProc(ctx).(*linear.Processor),
-		attentionTransformerProcessor: m.AttentionTransformer.NewProc(ctx).(*linear.Processor),
-		attentionBatchNormProcessor:   m.AttentionBatchNorm.NewProc(ctx).(*batchnorm.Processor),
+		attentionTransformerProcessor: m.createAttentionTransformerProcessors(ctx),
+		attentionBatchNormProcessor:   m.createAttentionBatchNormProcessors(ctx),
 	}
+}
+
+func (m *TabNet) createAttentionTransformerProcessors(ctx nn.Context) []*linear.Processor {
+	result := make([]*linear.Processor, m.NumDecisionSteps)
+	for i := range result {
+		result[i] = m.AttentionTransformer[i].NewProc(ctx).(*linear.Processor)
+	}
+	return result
+}
+
+func (m *TabNet) createAttentionBatchNormProcessors(ctx nn.Context) []*batchnorm.Processor {
+	result := make([]*batchnorm.Processor, m.NumDecisionSteps)
+	for i := range result {
+		result[i] = m.AttentionBatchNorm[i].NewProc(ctx).(*batchnorm.Processor)
+	}
+	return result
 }
 
 func (p *TabNetProcessor) Forward(xs ...ag.Node) []ag.Node {
@@ -138,8 +173,8 @@ func (p *TabNetProcessor) Forward(xs ...ag.Node) []ag.Node {
 	maskedFeatures := p.copy(input)
 
 	for i := 0; i < p.model.NumDecisionSteps; i++ {
-		transformed := p.sharedTransformerProcessor.Forward(maskedFeatures...)
-		transformed = p.stepTransformerProcessors[i].Forward(transformed...)
+		transformed := p.sharedTransformerProcessor.Process(i, maskedFeatures...)
+		transformed = p.stepTransformerProcessors[i].Process(0, transformed...)
 		if i > 0 {
 			decision := make([]ag.Node, len(xs))
 			for k := range xs {
@@ -152,7 +187,7 @@ func (p *TabNetProcessor) Forward(xs ...ag.Node) []ag.Node {
 			continue // skip attention entropy calculation
 		}
 
-		mask := p.attentionBatchNormProcessor.Forward(p.attentionTransformerProcessor.Forward(transformed...)...)
+		mask := p.attentionBatchNormProcessor[i].Forward(p.attentionTransformerProcessor[i].Forward(transformed...)...)
 		for k := range mask {
 			mask[k] = g.Prod(mask[k], complementaryAggregatedMaskValues[k])
 			mask[k] = g.SparseMax(mask[k])
