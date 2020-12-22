@@ -22,17 +22,17 @@ func TestGolem(t *testing.T) {
 	}{
 		{
 			Name:                "Iris",
-			TrainCmdLine:        "train -i datasets/iris/iris.train -o $MODEL -t species -n 20 -s 3 --sparsity-loss-weight 0.01",
+			TrainCmdLine:        "train -i datasets/iris/iris.train -o $MODEL -t species --categorical-columns species -n 20 -s 3 --sparsity-loss-weight 0.01",
 			TestCmdLine:         "test -m $MODEL -i datasets/iris/iris.test",
 			ExpectedTrainOutput: []string{"Epoch 19"},
 			ExpectedTestOutput:  []string{"Macro F1: 0.9"},
 		},
 		{
 			Name:                "Breast Cancer",
-			TrainCmdLine:        "train -t Class -i datasets/breast_cancer/breast-cancer.train -o $MODEL --categorical-columns Age,Menopause,Tumor-size,Inv-nodes,Node-caps,Breast,Breast-quad,Irradiat  -s 3 -n 50",
+			TrainCmdLine:        "train -t Class -i datasets/breast_cancer/breast-cancer.train -o $MODEL --categorical-columns Class,Age,Menopause,Tumor-size,Inv-nodes,Node-caps,Breast,Breast-quad,Irradiat  -s 3 -n 50",
 			TestCmdLine:         "test -i datasets/breast_cancer/breast-cancer.test -m $MODEL ",
 			ExpectedTrainOutput: []string{"Epoch 49"},
-			ExpectedTestOutput:  []string{"Macro F1: 0.71"},
+			ExpectedTestOutput:  []string{"Macro F1: 0.7"},
 		},
 	}
 
@@ -69,7 +69,7 @@ func TestGolem(t *testing.T) {
 			require.NoError(t, err)
 			out = string(outBytes)
 			for _, expected := range tt.ExpectedTestOutput {
-				require.True(t, strings.Contains(out, expected))
+				require.True(t, strings.Contains(out, expected), "Expected: %s , got: %s", expected, out)
 			}
 
 		})

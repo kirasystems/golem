@@ -1,6 +1,6 @@
 module golem
 
-go 1.15
+go 1.14
 
 // replace github.com/nlpodyssey/spago => ../spago
 

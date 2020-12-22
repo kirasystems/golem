@@ -1,5 +1,10 @@
 package model
 
+import (
+	"fmt"
+	"strconv"
+)
+
 // NameMap implements a bidirectional mapping between a name and an index
 type NameMap struct {
 	NameToIndex map[string]int
@@ -141,12 +146,23 @@ func (d *Metadata) FeatureCount() int {
 	return d.CategoricalFeaturesMap.Size() + d.ContinuousFeaturesMap.Size()
 }
 
-func (d *Metadata) ParseCategoricalTarget(value string) (float64, bool) {
+func (d *Metadata) ParseCategoricalTarget(value string) (float64, error) {
 	index, ok := d.TargetMap.ContainsName(value)
-	return float64(index), ok
+	if !ok {
+		return 0, fmt.Errorf("unknown categorical target value %s", value)
+	}
+	return float64(index), nil
 }
-func (d *Metadata) ParseOrAddCategoricalTarget(value string) float64 {
+
+// ParseOrAddCategoricalTarget always succeeds by returning the existing or new
+// categorical target value index
+func (d *Metadata) ParseOrAddCategoricalTarget(value string) (float64, error) {
 	target, _ := d.TargetMap.ValueFor(value)
-	return float64(target)
+	return float64(target), nil
+
+}
+
+func (d *Metadata) ParseContinuousTarget(s string) (float64, error) {
+	return strconv.ParseFloat(s, 64)
 
 }

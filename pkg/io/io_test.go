@@ -10,7 +10,7 @@ func TestLoadData(t *testing.T) {
 	params := DataParameters{
 		DataFile:           "../../datasets/breast_cancer/breast-cancer.train",
 		TargetColumn:       "Class",
-		CategoricalColumns: NewSet("Age", "Menopause", "Tumor-size", "Inv-nodes", "Node-caps", "Breast", "Breast-quad", "Irradiat"),
+		CategoricalColumns: NewSet("Class", "Age", "Menopause", "Tumor-size", "Inv-nodes", "Node-caps", "Breast", "Breast-quad", "Irradiat"),
 		BatchSize:          10,
 	}
 
