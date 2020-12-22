@@ -39,7 +39,7 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 	}
 	_, data, dataErrors, err := io.LoadData(io.DataParameters{
 		DataFile:           inputFileName,
-		TargetColumn:       model.MetaData.Columns[model.MetaData.TargetColumn],
+		TargetColumn:       model.MetaData.Columns[model.MetaData.TargetColumn].Name,
 		CategoricalColumns: nil,
 		BatchSize:          1,
 	}, model.MetaData)

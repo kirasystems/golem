@@ -86,7 +86,7 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []Da
 	if metaData == nil {
 		metaData = model.NewMetadata()
 		newMetadata = true
-		metaData.Columns = record
+		metaData.Columns = parseColumns(record, p)
 		if err := setTargetColumn(p, metaData); err != nil {
 			return nil, nil, nil, err
 		}
@@ -146,6 +146,25 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []Da
 	return metaData, result, errors, nil
 }
 
+func parseColumns(record []string, p DataParameters) []model.Column {
+	result := make([]model.Column, len(record))
+
+	columnType := func(c string) model.ColumnType {
+		if _, ok := p.CategoricalColumns[c]; ok {
+			return model.Categorical
+		}
+		return model.Continuous
+	}
+	for i := range result {
+		result[i] = model.Column{
+			Name: record[i],
+			Type: columnType(record[i]),
+		}
+	}
+
+	return result
+}
+
 func parseCategoricalFeatures(metaData *model.Metadata, newMetadata bool, record []string) ([]int, error) {
 	categoricalFeatures := make([]int, metaData.CategoricalFeaturesMap.Size())
 	for column, index := range metaData.CategoricalFeaturesMap.ColumnToIndex {
@@ -160,7 +179,7 @@ func parseCategoricalFeatures(metaData *model.Metadata, newMetadata bool, record
 			ok := false
 			valueIndex, ok = metaData.CategoricalValuesMap.ValueToIndex[categoryValue]
 			if !ok {
-				return nil, fmt.Errorf("unknown value %s for categorical attribute %s", metaData.Columns[column], record[column])
+				return nil, fmt.Errorf("unknown value %s for categorical attribute %s", metaData.Columns[column].Name, record[column])
 			}
 		}
 		categoricalFeatures[index] = valueIndex
@@ -172,7 +191,7 @@ func parseContinuousFeatures(metaData *model.Metadata, record []string, features
 	for column, index := range metaData.ContinuousFeaturesMap.ColumnToIndex {
 		value, err := strconv.ParseFloat(record[column], 64)
 		if err != nil {
-			return fmt.Errorf("error parsing feature %s: %w", metaData.Columns[column], err)
+			return fmt.Errorf("error parsing feature %s: %w", metaData.Columns[column].Name, err)
 		}
 		features.Set(index, 0, value)
 	}
@@ -180,6 +199,7 @@ func parseContinuousFeatures(metaData *model.Metadata, record []string, features
 }
 
 func parseTarget(newMetadata bool, metaData *model.Metadata, target string) (float64, error) {
+
 	targetValue := 0.0
 	if newMetadata {
 		targetValue = metaData.ParseOrAddCategoricalTarget(target)
@@ -198,7 +218,7 @@ func buildFeatureIndex(p DataParameters, metaData *model.Metadata) {
 	continuousFeatureIndex := 0
 	categoricalFeatureIndex := 0
 	for i, col := range metaData.Columns {
-		_, isCategorical := p.CategoricalColumns[col]
+		_, isCategorical := p.CategoricalColumns[col.Name]
 		if i != metaData.TargetColumn {
 			if !isCategorical {
 				metaData.ContinuousFeaturesMap.Set(i, continuousFeatureIndex)
@@ -213,7 +233,7 @@ func buildFeatureIndex(p DataParameters, metaData *model.Metadata) {
 
 func setTargetColumn(p DataParameters, metaData *model.Metadata) error {
 	for i, col := range metaData.Columns {
-		if col == p.TargetColumn {
+		if col.Name == p.TargetColumn {
 			metaData.TargetColumn = i
 			return nil
 		}

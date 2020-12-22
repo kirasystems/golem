@@ -89,8 +89,20 @@ func (c *CategoricalValuesMap) Size() int {
 	return len(c.ValueToIndex)
 }
 
+type ColumnType int
+
+const (
+	Continuous ColumnType = iota
+	Categorical
+)
+
+type Column struct {
+	Name string
+	Type ColumnType
+}
+
 type Metadata struct {
-	Columns []string
+	Columns []Column
 
 	// ContinuousFeaturesMap maps a data row column index to a dense matrix column index
 	ContinuousFeaturesMap *ColumnMap
