@@ -23,10 +23,34 @@ type TrainingParameters struct {
 	CategoricalColumns []string
 }
 
+type lossFunc func(g *ag.Graph, prediction ag.Node, target float64) ag.Node
+
+func crossEntropyLoss(g *ag.Graph, prediction ag.Node, target float64) ag.Node {
+	return losses.CrossEntropy(g, prediction, int(target))
+}
+
+func mseLoss(g *ag.Graph, prediction ag.Node, target float64) ag.Node {
+	return losses.MSE(g, prediction, g.NewScalar(target), false)
+}
+
+func lossFor(metadata *model.Metadata) lossFunc {
+	modelType := metadata.Columns[metadata.TargetColumn].Type
+	switch modelType {
+	case model.Continuous:
+		return mseLoss
+	case model.Categorical:
+		return crossEntropyLoss
+	default:
+		log.Panicf("unsupported model type received: %d", modelType)
+		return nil
+	}
+}
+
 type Trainer struct {
 	params    TrainingParameters
 	optimizer *gd.GradientDescent
 	model     *model.TabNet
+	lossFunc  lossFunc
 }
 
 func Train(trainFile, outputFileName, targetColumn string, config model.TabNetConfig, trainingParams TrainingParameters) {
@@ -52,8 +76,15 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 	//Overwrite values that are  only known after parsing the dataset
 	config.NumColumns = metaData.FeatureCount()
 	config.NumCategoricalEmbeddings = len(metaData.CategoricalValuesMap.ValueToIndex)
+	switch metaData.Columns[metaData.TargetColumn].Type {
+	case model.Categorical:
+		config.OutputDimension = metaData.TargetMap.Size()
+	case model.Continuous:
+		config.OutputDimension = 1
+	}
 
 	t.model = model.NewTabNet(config)
+	t.lossFunc = lossFor(metaData)
 	t.model.Init(rndGen)
 
 	updaterConfig := adam.NewDefaultConfig() // TODO: `radam` may provide better results
@@ -66,10 +97,10 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 	for epoch := 0; epoch < trainingParams.NumEpochs; epoch++ {
 		t.optimizer.IncEpoch()
 		for i, batch := range data {
-			totalLoss, classificationLoss, sparsityLoss := t.trainBatch(batch)
+			totalLoss, targetLoss, sparsityLoss := t.trainBatch(batch)
 			t.optimizer.Optimize()
 			if i%t.params.ReportInterval == 0 {
-				log.Printf("Epoch %d batch %d loss %.5f | %.5f | %.5f \n", epoch, i, totalLoss, classificationLoss, sparsityLoss)
+				log.Printf("Epoch %d batch %d loss %.5f | %.5f | %.5f \n", epoch, i, totalLoss, targetLoss, sparsityLoss)
 			}
 		}
 	}
@@ -104,31 +135,41 @@ func (t *Trainer) trainBatch(batch io.DataBatch) (float64, float64, float64) {
 	defer g.Clear()
 	input := createInputNodes(batch, g, t.model)
 	modelProc := t.model.NewProc(nn.Context{Graph: g, Mode: nn.Training}).(*model.TabNetProcessor)
-	logits := modelProc.Forward(input...)
-	var loss, classificationLoss, sparsityLoss ag.Node
+	prediction := modelProc.Forward(input...)
+	var batchLoss, batchTargetLoss, batchSparsityLoss ag.Node
 	for i := range batch {
-		exampleCrossEntropy := losses.CrossEntropy(g, logits[i], int(batch[i].Target))
-		classificationLoss = g.Add(classificationLoss, exampleCrossEntropy)
-		sparsityLoss = g.Add(sparsityLoss, modelProc.AttentionEntropy[i])
+		targetLoss := t.lossFunc(g, prediction[i], batch[i].Target)
+		batchTargetLoss = g.Add(batchTargetLoss, targetLoss)
+		batchSparsityLoss = g.Add(batchSparsityLoss, modelProc.AttentionEntropy[i])
 		exampleAttentionEntropy := g.Mul(modelProc.AttentionEntropy[i], g.Constant(t.model.SparsityLossWeight))
-		exampleLoss := g.Add(exampleCrossEntropy, exampleAttentionEntropy)
-		loss = g.Add(loss, exampleLoss)
+		exampleLoss := g.Add(targetLoss, exampleAttentionEntropy)
+		batchLoss = g.Add(batchLoss, exampleLoss)
 	}
 	batchSize := g.NewScalar(float64(len(batch)))
-	loss = g.Div(loss, batchSize)
-	classificationLoss = g.Div(classificationLoss, batchSize)
-	sparsityLoss = g.Div(sparsityLoss, batchSize)
+	batchLoss = g.Div(batchLoss, batchSize)
+	batchTargetLoss = g.Div(batchTargetLoss, batchSize)
+	batchSparsityLoss = g.Div(batchSparsityLoss, batchSize)
 
-	g.Backward(loss)
-	return loss.ScalarValue(), classificationLoss.ScalarValue(), sparsityLoss.ScalarValue()
+	g.Backward(batchLoss)
+	return batchLoss.ScalarValue(), batchTargetLoss.ScalarValue(), batchSparsityLoss.ScalarValue()
 }
 
 func createInputNodes(batch io.DataBatch, g *ag.Graph, model *model.TabNet) []ag.Node {
 	input := make([]ag.Node, len(batch))
 	for i := range input {
-		input[i] = g.NewVariable(batch[i].ContinuousFeatures, false)
-		for _, index := range batch[i].CategoricalFeatures {
-			input[i] = g.Concat(input[i], g.NewWrap(model.CategoricalFeatureEmbeddings[index]))
+		if batch[i].ContinuousFeatures.Size() > 0 {
+			input[i] = g.NewVariable(batch[i].ContinuousFeatures, false)
+		}
+		numCategoricalFeatures := len(batch[i].CategoricalFeatures)
+		if numCategoricalFeatures > 0 {
+			featureNodes := make([]ag.Node, 0, numCategoricalFeatures+1)
+			if input[i] != nil {
+				featureNodes = append(featureNodes, input[i])
+			}
+			for _, index := range batch[i].CategoricalFeatures {
+				featureNodes = append(featureNodes, g.NewWrap(model.CategoricalFeatureEmbeddings[index]))
+			}
+			input[i] = g.Concat(featureNodes...)
 		}
 	}
 	return input

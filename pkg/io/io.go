@@ -32,7 +32,7 @@ type DataRecord struct {
 }
 
 // DataBatch holds a minibatch of data.
-type DataBatch []DataRecord
+type DataBatch []*DataRecord
 
 func (d DataBatch) Size() int {
 	return len(d)
@@ -90,7 +90,7 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []Da
 		if err := setTargetColumn(p, metaData); err != nil {
 			return nil, nil, nil, err
 		}
-		buildFeatureIndex(p, metaData)
+		buildFeatureIndex(metaData)
 	}
 
 	var result []DataBatch
@@ -131,7 +131,7 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []Da
 			})
 			continue
 		}
-		currentBatch = append(currentBatch, dataRecord)
+		currentBatch = append(currentBatch, &dataRecord)
 		if len(currentBatch) == p.BatchSize {
 			result = append(result, currentBatch)
 			currentBatch = make(DataBatch, 0, p.BatchSize)
@@ -167,7 +167,8 @@ func parseColumns(record []string, p DataParameters) []model.Column {
 
 func parseCategoricalFeatures(metaData *model.Metadata, newMetadata bool, record []string) ([]int, error) {
 	categoricalFeatures := make([]int, metaData.CategoricalFeaturesMap.Size())
-	for column, index := range metaData.CategoricalFeaturesMap.ColumnToIndex {
+	for column := range metaData.CategoricalFeaturesMap.Columns() {
+		index := metaData.CategoricalFeaturesMap.ColumnToIndex[column]
 		categoryValue := model.CategoricalValue{
 			Column: column,
 			Value:  record[column],
@@ -220,7 +221,7 @@ func parseTarget(newMetadata bool, metaData *model.Metadata, target string) (flo
 	return targetValue, nil
 }
 
-func buildFeatureIndex(p DataParameters, metaData *model.Metadata) {
+func buildFeatureIndex(metaData *model.Metadata) {
 	continuousFeatureIndex := 0
 	categoricalFeatureIndex := 0
 	for i, col := range metaData.Columns {

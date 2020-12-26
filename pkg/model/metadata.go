@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 )
 
@@ -59,6 +60,16 @@ func (f ColumnMap) Size() int {
 func (f ColumnMap) GetColumn(column int) (int, bool) {
 	index, ok := f.ColumnToIndex[column]
 	return index, ok
+}
+
+func (f ColumnMap) Columns() []int {
+	result := make([]int, 0, len(f.ColumnToIndex))
+	for i := range f.ColumnToIndex {
+		result = append(result, i)
+	}
+
+	sort.Ints(result)
+	return result
 }
 func NewColumnMap() *ColumnMap {
 	return &ColumnMap{

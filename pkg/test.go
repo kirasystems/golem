@@ -7,7 +7,6 @@ import (
 	"sort"
 
 	"github.com/nlpodyssey/spago/pkg/mat"
-	"github.com/nlpodyssey/spago/pkg/ml/losses"
 
 	"golem/pkg/io"
 	"golem/pkg/model"
@@ -66,6 +65,7 @@ func testInternal(model *model.Model, data []io.DataBatch, outputFileName string
 		outputWriter = NoopWriter{}
 	}
 
+	lossFunc := lossFor(model.MetaData)
 	metrics := make(map[string]*stats.ClassMetrics)
 
 	g := ag.NewGraph(ag.Rand(rand.NewLockedRand(42)))
@@ -77,7 +77,7 @@ func testInternal(model *model.Model, data []io.DataBatch, outputFileName string
 	for _, d := range data {
 		predictions := predict(g, model, d)
 		for _, prediction := range predictions {
-			loss += losses.CrossEntropy(g, g.NewVariable(prediction.logits, false), int(prediction.labelValue)).ScalarValue()
+			loss += lossFunc(g, g.NewVariable(prediction.logits, false), prediction.labelValue).ScalarValue()
 			numLosses++
 
 			fmt.Fprintf(outputWriter, "%s,%s,%.5f\n", prediction.label, prediction.predictedClass, prediction.maxLogit)
@@ -173,7 +173,7 @@ func predict(g *ag.Graph, model *model.Model, data io.DataBatch) []prediction {
 			predictedClass: className,
 			label:          label,
 			labelValue:     data[i].Target,
-			logits:         logits[i].Value(),
+			logits:         logits[i].Value().Clone(),
 			maxLogit:       logit,
 		}
 	}

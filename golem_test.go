@@ -31,8 +31,8 @@ func TestGolem(t *testing.T) {
 			Name:                "Breast Cancer",
 			TrainCmdLine:        "train -t Class -i datasets/breast_cancer/breast-cancer.train -o $MODEL --categorical-columns Class,Age,Menopause,Tumor-size,Inv-nodes,Node-caps,Breast,Breast-quad,Irradiat  -s 3 -n 50",
 			TestCmdLine:         "test -i datasets/breast_cancer/breast-cancer.test -m $MODEL ",
-			ExpectedTrainOutput: []string{"Epoch 49"},
-			ExpectedTestOutput:  []string{"Macro F1: 0.7"},
+			ExpectedTrainOutput: []string{"Epoch 8"},
+			ExpectedTestOutput:  []string{"Macro F1: 0.6"},
 		},
 	}
 

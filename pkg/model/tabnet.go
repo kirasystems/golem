@@ -103,7 +103,8 @@ func (m *TabNet) Init(generator *rand.LockedRand) {
 	initializers.XavierUniform(m.OutputLayer.W.Value(), gain, generator)
 
 	for _, p := range m.CategoricalFeatureEmbeddings {
-		initializers.Uniform(p.Value(), 0.1, 0.1, generator)
+		initializers.Uniform(p.Value(), -0.1, 0.1, generator)
+
 	}
 }
 
