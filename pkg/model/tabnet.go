@@ -13,13 +13,13 @@ import (
 )
 
 var (
-	_ nn.Model     = &TabNet{}
-	_ nn.Processor = &TabNetProcessor{}
+	_ nn.Model = &TabNet{}
 )
 
 //  TabNet is an implementation of:
 // "TabNet: Attentive Interpretable Tabular Learning" - https://arxiv.org/abs/1908.07442
 type TabNet struct {
+	nn.BaseModel
 	TabNetConfig
 	FeatureBatchNorm             *batchnorm.Model
 	SharedFeatureTransformer     *featuretransformer.Model
@@ -27,8 +27,11 @@ type TabNet struct {
 	AttentionTransformer         []*linear.Model
 	AttentionBatchNorm           []*batchnorm.Model
 	OutputLayer                  *linear.Model
-	CategoricalFeatureEmbeddings []*nn.Param
+	CategoricalFeatureEmbeddings []nn.Param `spago:"type:weights"`
+	AttentionEntropy             []ag.Node  `spago:"scope:processor"`
 }
+
+// sharedTransformerProcessor no residual
 
 const Epsilon = 0.00001
 
@@ -46,8 +49,8 @@ type TabNetConfig struct {
 }
 
 func NewTabNet(config TabNetConfig) *TabNet {
-
 	return &TabNet{
+		BaseModel:                    nn.BaseModel{RCS: true},
 		TabNetConfig:                 config,
 		FeatureBatchNorm:             batchnorm.NewWithMomentum(config.NumColumns, config.BatchMomentum),
 		SharedFeatureTransformer:     featuretransformer.New(config.NumColumns, config.IntermediateFeatureDimension, config.NumDecisionSteps, config.BatchMomentum),
@@ -76,8 +79,8 @@ func createLinearTransformers(config TabNetConfig) []*linear.Model {
 	return result
 }
 
-func newCategoricalFeatureEmbeddings(config TabNetConfig) []*nn.Param {
-	embeddings := make([]*nn.Param, config.NumCategoricalEmbeddings)
+func newCategoricalFeatureEmbeddings(config TabNetConfig) []nn.Param {
+	embeddings := make([]nn.Param, config.NumCategoricalEmbeddings)
 	for i := range embeddings {
 		embeddings[i] = nn.NewParam(mat.NewEmptyVecDense(config.CategoricalEmbeddingDimension), nn.RequiresGrad(true))
 	}
@@ -91,6 +94,7 @@ func newStepFeatureTransformers(config TabNetConfig) []*featuretransformer.Model
 	}
 	return stepFeatureTransformers
 }
+
 func (m *TabNet) Init(generator *rand.LockedRand) {
 	m.SharedFeatureTransformer.Init(generator)
 	for _, t := range m.StepFeatureTransformers {
@@ -108,74 +112,23 @@ func (m *TabNet) Init(generator *rand.LockedRand) {
 	}
 }
 
-type TabNetProcessor struct {
-	nn.BaseProcessor
-	model                         *TabNet
-	featureBatchNormProcessor     *batchnorm.Processor
-	sharedTransformerProcessor    *featuretransformer.Processor
-	stepTransformerProcessors     []*featuretransformer.Processor
-	attentionTransformerProcessor []*linear.Processor
-	attentionBatchNormProcessor   []*batchnorm.Processor
-	outputProcessor               *linear.Processor
+func (m *TabNet) Forward(xs ...ag.Node) []ag.Node {
+	g := m.Graph()
 
-	AttentionEntropy []ag.Node // computed by forward
-}
-
-func (m *TabNet) NewProc(ctx nn.Context) nn.Processor {
-	stepTransformerProcessors := make([]*featuretransformer.Processor, m.NumDecisionSteps)
-	for i := range stepTransformerProcessors {
-		stepTransformerProcessors[i] = m.StepFeatureTransformers[i].NewProc(ctx).(*featuretransformer.Processor)
-	}
-	return &TabNetProcessor{
-		BaseProcessor: nn.BaseProcessor{
-			Model:             m,
-			Mode:              ctx.Mode,
-			Graph:             ctx.Graph,
-			FullSeqProcessing: true,
-		},
-		model:                         m,
-		featureBatchNormProcessor:     m.FeatureBatchNorm.NewProc(ctx).(*batchnorm.Processor),
-		sharedTransformerProcessor:    m.SharedFeatureTransformer.NewProcNoResidual(ctx).(*featuretransformer.Processor),
-		stepTransformerProcessors:     stepTransformerProcessors,
-		outputProcessor:               m.OutputLayer.NewProc(ctx).(*linear.Processor),
-		attentionTransformerProcessor: m.createAttentionTransformerProcessors(ctx),
-		attentionBatchNormProcessor:   m.createAttentionBatchNormProcessors(ctx),
-	}
-}
-
-func (m *TabNet) createAttentionTransformerProcessors(ctx nn.Context) []*linear.Processor {
-	result := make([]*linear.Processor, m.NumDecisionSteps)
-	for i := range result {
-		result[i] = m.AttentionTransformer[i].NewProc(ctx).(*linear.Processor)
-	}
-	return result
-}
-
-func (m *TabNet) createAttentionBatchNormProcessors(ctx nn.Context) []*batchnorm.Processor {
-	result := make([]*batchnorm.Processor, m.NumDecisionSteps)
-	for i := range result {
-		result[i] = m.AttentionBatchNorm[i].NewProc(ctx).(*batchnorm.Processor)
-	}
-	return result
-}
-
-func (p *TabNetProcessor) Forward(xs ...ag.Node) []ag.Node {
-	g := p.Graph
-
-	input := p.featureBatchNormProcessor.Forward(xs...)
+	input := m.FeatureBatchNorm.Forward(xs...)
 
 	complementaryAggregatedMaskValues := make([]ag.Node, len(xs))
 	for i := range xs {
-		complementaryAggregatedMaskValues[i] = g.NewVariable(mat.NewInitVecDense(p.model.NumColumns, 1.0), true)
+		complementaryAggregatedMaskValues[i] = g.NewVariable(mat.NewInitVecDense(m.NumColumns, 1.0), true)
 	}
 
-	p.AttentionEntropy = make([]ag.Node, len(xs))
+	m.AttentionEntropy = make([]ag.Node, len(xs))
 	outputAggregated := make([]ag.Node, len(xs))
-	maskedFeatures := p.copy(input)
+	maskedFeatures := m.copy(input)
 
-	for i := 0; i < p.model.NumDecisionSteps; i++ {
-		transformed := p.sharedTransformerProcessor.Process(i, maskedFeatures...)
-		transformed = p.stepTransformerProcessors[i].Process(0, transformed...)
+	for i := 0; i < m.NumDecisionSteps; i++ {
+		transformed := m.SharedFeatureTransformer.Process(i, maskedFeatures, true) // skip residual input
+		transformed = m.StepFeatureTransformers[i].Process(0, transformed, false)  // use residual input
 		if i > 0 {
 			decision := make([]ag.Node, len(xs))
 			for k := range xs {
@@ -184,31 +137,31 @@ func (p *TabNetProcessor) Forward(xs ...ag.Node) []ag.Node {
 			}
 		}
 
-		if i == p.model.NumDecisionSteps-1 {
+		if i == m.NumDecisionSteps-1 {
 			continue // skip attention entropy calculation
 		}
 
-		mask := p.attentionBatchNormProcessor[i].Forward(p.attentionTransformerProcessor[i].Forward(transformed...)...)
+		mask := m.AttentionBatchNorm[i].Forward(m.AttentionTransformer[i].Forward(transformed...)...)
 		for k := range mask {
 			mask[k] = g.Prod(mask[k], complementaryAggregatedMaskValues[k])
 			mask[k] = g.SparseMax(mask[k])
 			complementaryAggregatedMaskValues[k] = g.Prod(complementaryAggregatedMaskValues[k],
-				g.Neg(g.SubScalar(mask[k], g.Constant(p.model.RelaxationFactor))))
+				g.Neg(g.SubScalar(mask[k], g.Constant(m.RelaxationFactor))))
 			maskedFeatures[k] = g.Prod(input[k], mask[k])
 			stepAttentionEntropy := g.ReduceSum(g.Prod(g.Neg(mask[k]), g.Log(g.AddScalar(mask[k], g.Constant(Epsilon)))))
-			stepAttentionEntropy = g.DivScalar(stepAttentionEntropy, g.Constant(float64(p.model.NumDecisionSteps-1)))
-			p.AttentionEntropy[k] = g.Add(p.AttentionEntropy[k], stepAttentionEntropy)
+			stepAttentionEntropy = g.DivScalar(stepAttentionEntropy, g.Constant(float64(m.NumDecisionSteps-1)))
+			m.AttentionEntropy[k] = g.Add(m.AttentionEntropy[k], stepAttentionEntropy)
 		}
 	}
 
-	return p.outputProcessor.Forward(outputAggregated...)
+	return m.OutputLayer.Forward(outputAggregated...)
 }
 
 // copy makes a copy of input in a gradient-preserving way
-func (p *TabNetProcessor) copy(xs []ag.Node) []ag.Node {
+func (m *TabNet) copy(xs []ag.Node) []ag.Node {
 	ys := make([]ag.Node, len(xs))
 	for i, x := range xs {
-		ys[i] = p.Graph.Identity(x)
+		ys[i] = m.Graph().Identity(x)
 	}
 	return ys
 }

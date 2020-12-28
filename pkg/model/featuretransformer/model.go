@@ -11,19 +11,21 @@ import (
 )
 
 var (
-	_ nn.Model     = &Model{}
-	_ nn.Processor = &Processor{}
+	_ nn.Model = &Model{}
 )
 
 // ContinuousFeatures Transformer Block
 type Model struct {
+	nn.BaseModel
 	Layer1 *Layer
 	Layer2 *Layer
 }
 
 func New(numInputFeatures, featureDimension, numSteps int, batchMomentum float64) *Model {
 	return &Model{
+		BaseModel: nn.BaseModel{RCS: true},
 		Layer1: &Layer{
+			BaseModel:                    nn.BaseModel{RCS: true},
 			InputDimension:               numInputFeatures,
 			IntermediateFeatureDimension: featureDimension,
 			DenseLayer:                   linear.New(numInputFeatures, 2*featureDimension, linear.BiasGrad(false)),
@@ -31,6 +33,7 @@ func New(numInputFeatures, featureDimension, numSteps int, batchMomentum float64
 			NumSteps:                     numSteps,
 		},
 		Layer2: &Layer{
+			BaseModel:                    nn.BaseModel{RCS: true},
 			InputDimension:               featureDimension,
 			IntermediateFeatureDimension: featureDimension,
 			DenseLayer:                   linear.New(featureDimension, 2*featureDimension, linear.BiasGrad(false)),
@@ -48,55 +51,29 @@ func createBatchNormModels(steps, featureDimension int, batchMomentum float64) [
 	return result
 }
 
-func (f *Model) Init(generator *rand.LockedRand) {
-	f.Layer1.Init(generator)
-	f.Layer2.Init(generator)
-}
-
-type Processor struct {
-	nn.BaseProcessor
-	layer1Processor   *LayerProcessor
-	layer2Processor   *LayerProcessor
-	skipResidualInput bool
+func (m *Model) Init(generator *rand.LockedRand) {
+	m.Layer1.Init(generator)
+	m.Layer2.Init(generator)
 }
 
 var SquareRootHalf = math.Sqrt(0.5)
 
-func (p *Processor) Forward(xs ...ag.Node) []ag.Node {
+func (m *Model) Forward(xs ...ag.Node) []ag.Node {
 	panic("Forward not implemented... please use Process instead")
 }
-func (p *Processor) Process(step int, xs ...ag.Node) []ag.Node {
-	g := p.Graph
+func (m *Model) Process(step int, xs []ag.Node, skipResidualInput bool) []ag.Node {
+	g := m.Graph()
 	theta := g.Constant(SquareRootHalf)
 
-	l1 := p.layer1Processor.Process(step, xs...)
-	if !p.skipResidualInput {
+	l1 := m.Layer1.Process(step, xs...)
+	if !skipResidualInput {
 		for i := range xs {
 			l1[i] = g.Mul(g.Add(l1[i], xs[i]), theta)
 		}
 	}
-	l2 := p.layer2Processor.Process(step, l1...)
+	l2 := m.Layer2.Process(step, l1...)
 	for i := range xs {
 		l2[i] = g.Mul(g.Add(l1[i], l2[i]), theta)
 	}
 	return l2
-}
-
-func (f *Model) NewProc(ctx nn.Context) nn.Processor {
-	return &Processor{
-		BaseProcessor: nn.BaseProcessor{
-			Model:             f,
-			Mode:              ctx.Mode,
-			Graph:             ctx.Graph,
-			FullSeqProcessing: true,
-		},
-		layer1Processor: f.Layer1.NewProc(ctx).(*LayerProcessor),
-		layer2Processor: f.Layer2.NewProc(ctx).(*LayerProcessor),
-	}
-}
-
-func (f *Model) NewProcNoResidual(ctx nn.Context) nn.Processor {
-	out := f.NewProc(ctx)
-	out.(*Processor).skipResidualInput = true
-	return out
 }

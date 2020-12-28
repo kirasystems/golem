@@ -133,9 +133,12 @@ func (t *Trainer) trainBatch(batch io.DataBatch) (float64, float64, float64) {
 
 	g := ag.NewGraph(ag.Rand(rand.NewLockedRand(t.params.RndSeed))) // TODO: we might use the same random generator among the batches until we run them concurrently
 	defer g.Clear()
+
 	input := createInputNodes(batch, g, t.model)
-	modelProc := t.model.NewProc(nn.Context{Graph: g, Mode: nn.Training}).(*model.TabNetProcessor)
+	ctx := nn.Context{Graph: g, Mode: nn.Training}
+	modelProc := nn.Reify(ctx, t.model).(*model.TabNet)
 	prediction := modelProc.Forward(input...)
+
 	var batchLoss, batchTargetLoss, batchSparsityLoss ag.Node
 	for i := range batch {
 		targetLoss := t.lossFunc(g, prediction[i], batch[i].Target)

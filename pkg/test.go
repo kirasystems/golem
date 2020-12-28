@@ -162,7 +162,8 @@ func predict(g *ag.Graph, model *model.Model, data io.DataBatch) []prediction {
 
 	input := createInputNodes(data, g, model.TabNet)
 
-	proc := model.TabNet.NewProc(nn.Context{Graph: g, Mode: nn.Inference})
+	ctx := nn.Context{Graph: g, Mode: nn.Inference}
+	proc := nn.Reify(ctx, model.TabNet)
 	logits := proc.Forward(input...)
 
 	for i := range logits {
