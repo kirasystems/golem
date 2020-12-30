@@ -34,6 +34,14 @@ func TestGolem(t *testing.T) {
 			ExpectedTrainOutput: []string{"Epoch 8"},
 			ExpectedTestOutput:  []string{"Macro F1: 0.6"},
 		},
+		//
+		{
+			Name:                "Boston Housing",
+			TrainCmdLine:        "train -i datasets/boston_housing/boston-housing-train.csv -o $MODEL -t medv  -b 128 -n 60 -s 3",
+			TestCmdLine:         "test -i datasets/boston_housing/boston-housing-test.csv -m $MODEL ",
+			ExpectedTrainOutput: []string{"Epoch 59"},
+			ExpectedTestOutput:  []string{"R-squared: 0.6"},
+		},
 	}
 
 	for _, tt := range tests {

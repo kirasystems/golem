@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/nlpodyssey/spago/pkg/mat"
+	"gonum.org/v1/gonum/stat"
 
 	"golem/pkg/io"
 	"golem/pkg/model"
@@ -51,7 +52,88 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 	}
 	return testInternal(model, data, outputFileName)
 }
-func testInternal(model *model.Model, data []io.DataBatch, outputFileName string) error {
+
+type modelEvaluator interface {
+	EvaluatePrediction(prediction ag.Node, record *io.DataRecord)
+	PrintMetrics(logger func(format string, v ...interface{}))
+	Loss() float64
+}
+
+type classificationEvaluator struct {
+	predictionCount int
+	loss            float64
+	metrics         map[string]*stats.ClassMetrics
+	model           *model.Model
+	lossFunc        lossFunc
+	g               *ag.Graph
+	outputWriter    gio.Writer
+}
+type classificationPrediction struct {
+	predictedClass string
+	label          string
+	labelValue     float64
+	logits         mat.Matrix
+	maxLogit       float64
+}
+
+func (c *classificationEvaluator) EvaluatePrediction(node ag.Node, record *io.DataRecord) {
+	prediction := c.decode(node, record)
+	c.loss += c.lossFunc(c.g, c.g.NewVariable(prediction.logits, false), prediction.labelValue).ScalarValue()
+	c.predictionCount++
+
+	fmt.Fprintf(c.outputWriter, "%s,%s,%.5f\n", prediction.label, prediction.predictedClass, prediction.maxLogit)
+
+	labelClassMetrics, ok := c.metrics[prediction.label]
+	if !ok {
+		labelClassMetrics = stats.NewMetricCounter()
+		c.metrics[prediction.label] = labelClassMetrics
+	}
+	predictedClassMetrics, ok := c.metrics[prediction.predictedClass]
+	if !ok {
+		predictedClassMetrics = stats.NewMetricCounter()
+		c.metrics[prediction.predictedClass] = predictedClassMetrics
+	}
+
+	if prediction.label == prediction.predictedClass {
+		labelClassMetrics.IncTruePos()
+	} else {
+		labelClassMetrics.IncFalseNeg()
+		predictedClassMetrics.IncFalsePos()
+	}
+
+}
+
+func (c *classificationEvaluator) PrintMetrics(logger func(format string, v ...interface{})) {
+	// Sort class names for deterministic output
+	sortedClasses := sortClasses(c.metrics)
+	for _, class := range sortedClasses {
+		result := c.metrics[class]
+		logger("Class %s: TP %d FP %d TN %d FN %d Precision %.3f Recall %.3f F1 %.3f\n",
+			class, result.TruePos, result.FalsePos, result.TrueNeg, result.FalseNeg, result.Precision(), result.Recall(),
+			result.F1Score())
+	}
+
+	microF1, macroF1 := computeOverallF1(c.metrics)
+	logger("Macro F1: %.3f - Micro F1: %.3f", macroF1, microF1)
+}
+
+func (c *classificationEvaluator) Loss() float64 {
+	return c.loss / float64(c.predictionCount)
+}
+
+func (c *classificationEvaluator) decode(modelOutput ag.Node, record *io.DataRecord) classificationPrediction {
+	class, logit := argmax(modelOutput.Value().Data())
+	className := c.model.MetaData.TargetMap.IndexToName[class]
+	label := c.model.MetaData.TargetMap.IndexToName[int(record.Target)]
+	return classificationPrediction{
+		predictedClass: className,
+		label:          label,
+		labelValue:     record.Target,
+		logits:         modelOutput.Value().Clone(),
+		maxLogit:       logit,
+	}
+}
+func testInternal(m *model.Model, data []io.DataBatch, outputFileName string) error {
 
 	var outputWriter gio.Writer
 	if outputFileName != "" {
@@ -65,57 +147,38 @@ func testInternal(model *model.Model, data []io.DataBatch, outputFileName string
 		outputWriter = NoopWriter{}
 	}
 
-	lossFunc := lossFor(model.MetaData)
-	metrics := make(map[string]*stats.ClassMetrics)
+	lossFunc := lossFor(m.MetaData)
 
 	g := ag.NewGraph(ag.Rand(rand.NewLockedRand(42)))
-	defer g.Clear()
 
-	loss := 0.0
-	numLosses := 0
+	var evaluator modelEvaluator
+	switch m.MetaData.TargetType() {
+	case model.Categorical:
+		evaluator = &classificationEvaluator{
+			metrics:      map[string]*stats.ClassMetrics{},
+			model:        m,
+			lossFunc:     lossFunc,
+			g:            g,
+			outputWriter: outputWriter,
+		}
+	default:
+		evaluator = &regressionEvaluator{
+			lossFunc: lossFunc,
+			g:        g,
+		}
+	}
 
 	for _, d := range data {
-		predictions := predict(g, model, d)
-		for _, prediction := range predictions {
-			loss += lossFunc(g, g.NewVariable(prediction.logits, false), prediction.labelValue).ScalarValue()
-			numLosses++
-
-			fmt.Fprintf(outputWriter, "%s,%s,%.5f\n", prediction.label, prediction.predictedClass, prediction.maxLogit)
-
-			labelClassMetrics, ok := metrics[prediction.label]
-			if !ok {
-				labelClassMetrics = stats.NewMetricCounter()
-				metrics[prediction.label] = labelClassMetrics
-			}
-			predictedClassMetrics, ok := metrics[prediction.predictedClass]
-			if !ok {
-				predictedClassMetrics = stats.NewMetricCounter()
-				metrics[prediction.predictedClass] = predictedClassMetrics
-			}
-
-			if prediction.label == prediction.predictedClass {
-				labelClassMetrics.IncTruePos()
-			} else {
-				labelClassMetrics.IncFalseNeg()
-				predictedClassMetrics.IncFalsePos()
-			}
-
+		predictions := predict(g, m, d)
+		for i, prediction := range predictions {
+			evaluator.EvaluatePrediction(prediction, d[i])
 		}
+		g.Clear()
 
 	}
-	loss = loss / float64(numLosses)
+	evaluator.PrintMetrics(log.Printf)
+	log.Printf("Loss %.5f", evaluator.Loss())
 
-	// Sort class names for deterministic output
-	sortedClasses := sortClasses(metrics)
-	for _, class := range sortedClasses {
-		result := metrics[class]
-		log.Printf("Class %s: TP %d FP %d TN %d FN %d Precision %.3f Recall %.3f F1 %.3f\n",
-			class, result.TruePos, result.FalsePos, result.TrueNeg, result.FalseNeg, result.Precision(), result.Recall(),
-			result.F1Score())
-	}
-
-	microF1, macroF1 := computeOverallF1(metrics)
-	log.Printf("Macro F1: %.3f - Micro F1: %.3f - Loss %.5f\n", macroF1, microF1, loss)
 	return nil
 }
 
@@ -144,40 +207,39 @@ func sortClasses(metrics map[string]*stats.ClassMetrics) []string {
 	}
 	sort.Strings(result)
 	return result
-
 }
 
-type prediction struct {
-	predictedClass string
-	label          string
-	labelValue     float64
-	logits         mat.Matrix
-	maxLogit       float64
+type regressionEvaluator struct {
+	loss            float64
+	predictionCount int
+	estimated       []float64
+	values          []float64
+	lossFunc        lossFunc
+	g               *ag.Graph
 }
 
-func predict(g *ag.Graph, model *model.Model, data io.DataBatch) []prediction {
+func (r *regressionEvaluator) EvaluatePrediction(prediction ag.Node, record *io.DataRecord) {
+	log.Printf("Test: target %.3f prediction %.3f", record.Target, prediction.ScalarValue())
+	r.estimated = append(r.estimated, prediction.ScalarValue())
+	r.values = append(r.values, record.Target)
+	r.loss += r.lossFunc(r.g, prediction, record.Target).ScalarValue()
+	r.predictionCount++
+}
 
-	//TODO: add support for continuous outputs
-	result := make([]prediction, data.Size())
+func (r *regressionEvaluator) PrintMetrics(logger func(format string, v ...interface{})) {
+	r2 := stat.RSquaredFrom(r.estimated, r.values, nil)
+	logger("R-squared: %.3f", r2)
+}
+
+func (r *regressionEvaluator) Loss() float64 {
+	return r.loss / float64(r.predictionCount)
+}
+
+func predict(g *ag.Graph, model *model.Model, data io.DataBatch) []ag.Node {
 
 	input := createInputNodes(data, g, model.TabNet)
-
 	proc := model.TabNet.NewProc(nn.Context{Graph: g, Mode: nn.Inference})
-	logits := proc.Forward(input...)
-
-	for i := range logits {
-		class, logit := argmax(logits[i].Value().Data())
-		className := model.MetaData.TargetMap.IndexToName[class]
-		label := model.MetaData.TargetMap.IndexToName[int(data[i].Target)]
-		result[i] = prediction{
-			predictedClass: className,
-			label:          label,
-			labelValue:     data[i].Target,
-			logits:         logits[i].Value().Clone(),
-			maxLogit:       logit,
-		}
-	}
-	g.Clear()
+	result := proc.Forward(input...)
 	return result
 
 }
