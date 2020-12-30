@@ -50,7 +50,6 @@ type TabNetConfig struct {
 
 func NewTabNet(config TabNetConfig) *TabNet {
 	return &TabNet{
-		BaseModel:                    nn.BaseModel{RCS: true},
 		TabNetConfig:                 config,
 		FeatureBatchNorm:             batchnorm.NewWithMomentum(config.NumColumns, config.BatchMomentum),
 		SharedFeatureTransformer:     featuretransformer.New(config.NumColumns, config.IntermediateFeatureDimension, config.NumDecisionSteps, config.BatchMomentum),
@@ -112,11 +111,10 @@ func (m *TabNet) Init(generator *rand.LockedRand) {
 	}
 }
 
-func (m *TabNet) Forward(in interface{}) interface{} {
-	xs := nn.ToNodes(in)
+func (m *TabNet) Forward(xs []ag.Node) []ag.Node {
 	g := m.Graph()
 
-	input := m.FeatureBatchNorm.Forward(xs).([]ag.Node)
+	input := m.FeatureBatchNorm.Forward(xs...)
 
 	complementaryAggregatedMaskValues := make([]ag.Node, len(xs))
 	for i := range xs {
@@ -128,20 +126,8 @@ func (m *TabNet) Forward(in interface{}) interface{} {
 	maskedFeatures := m.copy(input)
 
 	for i := 0; i < m.NumDecisionSteps; i++ {
-
-		transformed := m.SharedFeatureTransformer.Forward(
-			featuretransformer.Input{
-				Step:              i,
-				Xs:                maskedFeatures,
-				SkipResidualInput: true,
-			}).([]ag.Node)
-
-		transformed = m.StepFeatureTransformers[i].Forward(
-			featuretransformer.Input{
-				Step:              0,
-				Xs:                transformed,
-				SkipResidualInput: false,
-			}).([]ag.Node)
+		transformed := m.SharedFeatureTransformer.ForwardSkipResidualInput(i, maskedFeatures)
+		transformed = m.StepFeatureTransformers[i].Forward(0, transformed)
 
 		if i > 0 {
 			decision := make([]ag.Node, len(xs))
@@ -155,7 +141,7 @@ func (m *TabNet) Forward(in interface{}) interface{} {
 			continue // skip attention entropy calculation
 		}
 
-		mask := m.AttentionBatchNorm[i].Forward(m.AttentionTransformer[i].Forward(transformed)).([]ag.Node)
+		mask := m.AttentionBatchNorm[i].Forward(m.AttentionTransformer[i].Forward(transformed...)...)
 		for k := range mask {
 			mask[k] = g.Prod(mask[k], complementaryAggregatedMaskValues[k])
 			mask[k] = g.SparseMax(mask[k])
@@ -168,7 +154,7 @@ func (m *TabNet) Forward(in interface{}) interface{} {
 		}
 	}
 
-	return m.OutputLayer.Forward(outputAggregated)
+	return m.OutputLayer.Forward(outputAggregated...)
 }
 
 // copy makes a copy of input in a gradient-preserving way

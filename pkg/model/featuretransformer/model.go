@@ -23,9 +23,7 @@ type Model struct {
 
 func New(numInputFeatures, featureDimension, numSteps int, batchMomentum float64) *Model {
 	return &Model{
-		BaseModel: nn.BaseModel{RCS: true},
 		Layer1: &Layer{
-			BaseModel:                    nn.BaseModel{RCS: true},
 			InputDimension:               numInputFeatures,
 			IntermediateFeatureDimension: featureDimension,
 			DenseLayer:                   linear.New(numInputFeatures, 2*featureDimension, linear.BiasGrad(false)),
@@ -33,7 +31,6 @@ func New(numInputFeatures, featureDimension, numSteps int, batchMomentum float64
 			NumSteps:                     numSteps,
 		},
 		Layer2: &Layer{
-			BaseModel:                    nn.BaseModel{RCS: true},
 			InputDimension:               featureDimension,
 			IntermediateFeatureDimension: featureDimension,
 			DenseLayer:                   linear.New(featureDimension, 2*featureDimension, linear.BiasGrad(false)),
@@ -58,26 +55,26 @@ func (m *Model) Init(generator *rand.LockedRand) {
 
 var SquareRootHalf = math.Sqrt(0.5)
 
-type Input struct {
-	Step              int
-	Xs                []ag.Node
-	SkipResidualInput bool
+func (m *Model) Forward(step int, xs []ag.Node) []ag.Node {
+	return m.forward(step, xs, false)
 }
 
-func (m *Model) Forward(in interface{}) interface{} {
-	input := in.(Input)
-	step := input.Step
+func (m *Model) ForwardSkipResidualInput(step int, xs []ag.Node) []ag.Node {
+	return m.forward(step, xs, true)
+}
+
+func (m *Model) forward(step int, xs []ag.Node, skipResidualInput bool) []ag.Node {
 	g := m.Graph()
 	theta := g.Constant(SquareRootHalf)
 
-	l1 := m.Layer1.Forward(LayerInput{Step: step, Xs: input.Xs}).([]ag.Node)
-	if !input.SkipResidualInput {
-		for i := range input.Xs {
-			l1[i] = g.Mul(g.Add(l1[i], input.Xs[i]), theta)
+	l1 := m.Layer1.Forward(step, xs)
+	if !skipResidualInput {
+		for i := range xs {
+			l1[i] = g.Mul(g.Add(l1[i], xs[i]), theta)
 		}
 	}
-	l2 := m.Layer2.Forward(LayerInput{Step: step, Xs: l1}).([]ag.Node)
-	for i := range input.Xs {
+	l2 := m.Layer2.Forward(step, l1)
+	for i := range xs {
 		l2[i] = g.Mul(g.Add(l1[i], l2[i]), theta)
 	}
 	return l2

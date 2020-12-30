@@ -22,22 +22,16 @@ type Layer struct {
 	BatchNormLayer               []*batchnorm.Model
 }
 
-type LayerInput struct {
-	Step int
-	Xs   []ag.Node
-}
-
 func (m *Layer) Init(generator *rand.LockedRand) {
 	initializers.XavierUniform(m.DenseLayer.W.Value(), initializers.Gain(ag.OpSigmoid), generator)
 }
 
-func (m *Layer) Forward(in interface{}) interface{} {
-	input := in.(LayerInput)
-	transformedInput := m.DenseLayer.Forward(input.Xs)
-	transformedInput = m.BatchNormLayer[input.Step].Forward(transformedInput)
-	out := make([]ag.Node, len(input.Xs))
+func (m *Layer) Forward(step int, xs []ag.Node) []ag.Node {
+	transformedInput := m.DenseLayer.Forward(xs...)
+	transformedInput = m.BatchNormLayer[step].Forward(transformedInput...)
+	out := make([]ag.Node, len(xs))
 	for i := range out {
-		out[i] = glu(m.Graph(), 2*m.IntermediateFeatureDimension, transformedInput.([]ag.Node)[i])
+		out[i] = glu(m.Graph(), 2*m.IntermediateFeatureDimension, transformedInput[i])
 	}
 	return out
 }
