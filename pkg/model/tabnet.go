@@ -112,10 +112,11 @@ func (m *TabNet) Init(generator *rand.LockedRand) {
 	}
 }
 
-func (m *TabNet) Forward(xs ...ag.Node) []ag.Node {
+func (m *TabNet) Forward(in interface{}) interface{} {
+	xs := nn.ToNodes(in)
 	g := m.Graph()
 
-	input := m.FeatureBatchNorm.Forward(xs...)
+	input := m.FeatureBatchNorm.Forward(xs).([]ag.Node)
 
 	complementaryAggregatedMaskValues := make([]ag.Node, len(xs))
 	for i := range xs {
@@ -127,8 +128,21 @@ func (m *TabNet) Forward(xs ...ag.Node) []ag.Node {
 	maskedFeatures := m.copy(input)
 
 	for i := 0; i < m.NumDecisionSteps; i++ {
-		transformed := m.SharedFeatureTransformer.Process(i, maskedFeatures, true) // skip residual input
-		transformed = m.StepFeatureTransformers[i].Process(0, transformed, false)  // use residual input
+
+		transformed := m.SharedFeatureTransformer.Forward(
+			featuretransformer.Input{
+				Step:              i,
+				Xs:                maskedFeatures,
+				SkipResidualInput: true,
+			}).([]ag.Node)
+
+		transformed = m.StepFeatureTransformers[i].Forward(
+			featuretransformer.Input{
+				Step:              0,
+				Xs:                transformed,
+				SkipResidualInput: false,
+			}).([]ag.Node)
+
 		if i > 0 {
 			decision := make([]ag.Node, len(xs))
 			for k := range xs {
@@ -141,7 +155,7 @@ func (m *TabNet) Forward(xs ...ag.Node) []ag.Node {
 			continue // skip attention entropy calculation
 		}
 
-		mask := m.AttentionBatchNorm[i].Forward(m.AttentionTransformer[i].Forward(transformed...)...)
+		mask := m.AttentionBatchNorm[i].Forward(m.AttentionTransformer[i].Forward(transformed)).([]ag.Node)
 		for k := range mask {
 			mask[k] = g.Prod(mask[k], complementaryAggregatedMaskValues[k])
 			mask[k] = g.SparseMax(mask[k])
@@ -154,7 +168,7 @@ func (m *TabNet) Forward(xs ...ag.Node) []ag.Node {
 		}
 	}
 
-	return m.OutputLayer.Forward(outputAggregated...)
+	return m.OutputLayer.Forward(outputAggregated)
 }
 
 // copy makes a copy of input in a gradient-preserving way

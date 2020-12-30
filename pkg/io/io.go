@@ -258,11 +258,10 @@ func SaveModel(model *model.Model, writer io.Writer) error {
 
 func LoadModel(input io.Reader) (*model.Model, error) {
 	decoder := gob.NewDecoder(input)
-	model := model.Model{}
-	err := decoder.Decode(&model)
+	m := model.Model{}
+	err := decoder.Decode(&m)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding model: %w", err)
 	}
-	return &model, nil
-
+	return &m, nil
 }

@@ -58,21 +58,26 @@ func (m *Model) Init(generator *rand.LockedRand) {
 
 var SquareRootHalf = math.Sqrt(0.5)
 
-func (m *Model) Forward(xs ...ag.Node) []ag.Node {
-	panic("Forward not implemented... please use Process instead")
+type Input struct {
+	Step              int
+	Xs                []ag.Node
+	SkipResidualInput bool
 }
-func (m *Model) Process(step int, xs []ag.Node, skipResidualInput bool) []ag.Node {
+
+func (m *Model) Forward(in interface{}) interface{} {
+	input := in.(Input)
+	step := input.Step
 	g := m.Graph()
 	theta := g.Constant(SquareRootHalf)
 
-	l1 := m.Layer1.Process(step, xs...)
-	if !skipResidualInput {
-		for i := range xs {
-			l1[i] = g.Mul(g.Add(l1[i], xs[i]), theta)
+	l1 := m.Layer1.Forward(LayerInput{Step: step, Xs: input.Xs}).([]ag.Node)
+	if !input.SkipResidualInput {
+		for i := range input.Xs {
+			l1[i] = g.Mul(g.Add(l1[i], input.Xs[i]), theta)
 		}
 	}
-	l2 := m.Layer2.Process(step, l1...)
-	for i := range xs {
+	l2 := m.Layer2.Forward(LayerInput{Step: step, Xs: l1}).([]ag.Node)
+	for i := range input.Xs {
 		l2[i] = g.Mul(g.Add(l1[i], l2[i]), theta)
 	}
 	return l2

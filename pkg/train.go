@@ -137,7 +137,7 @@ func (t *Trainer) trainBatch(batch io.DataBatch) (float64, float64, float64) {
 	input := createInputNodes(batch, g, t.model)
 	ctx := nn.Context{Graph: g, Mode: nn.Training}
 	modelProc := nn.Reify(ctx, t.model).(*model.TabNet)
-	prediction := modelProc.Forward(input...)
+	prediction := modelProc.Forward(input).([]ag.Node)
 
 	var batchLoss, batchTargetLoss, batchSparsityLoss ag.Node
 	for i := range batch {

@@ -164,7 +164,7 @@ func predict(g *ag.Graph, model *model.Model, data io.DataBatch) []prediction {
 
 	ctx := nn.Context{Graph: g, Mode: nn.Inference}
 	proc := nn.Reify(ctx, model.TabNet)
-	logits := proc.Forward(input...)
+	logits := proc.Forward(input).([]ag.Node)
 
 	for i := range logits {
 		class, logit := argmax(logits[i].Value().Data())
