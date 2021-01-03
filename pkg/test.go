@@ -155,20 +155,21 @@ type prediction struct {
 	maxLogit       float64
 }
 
-func predict(g *ag.Graph, model *model.Model, data io.DataBatch) []prediction {
+func predict(g *ag.Graph, m *model.Model, data io.DataBatch) []prediction {
 
 	//TODO: add support for continuous outputs
 	result := make([]prediction, data.Size())
 
-	input := createInputNodes(data, g, model.TabNet)
+	input := createInputNodes(data, g, m.TabNet)
 
-	proc := model.TabNet.NewProc(nn.Context{Graph: g, Mode: nn.Inference})
-	logits := proc.Forward(input...)
+	ctx := nn.Context{Graph: g, Mode: nn.Inference}
+	proc := nn.Reify(ctx, m.TabNet).(*model.TabNet)
+	logits := proc.Forward(input)
 
 	for i := range logits {
 		class, logit := argmax(logits[i].Value().Data())
-		className := model.MetaData.TargetMap.IndexToName[class]
-		label := model.MetaData.TargetMap.IndexToName[int(data[i].Target)]
+		className := m.MetaData.TargetMap.IndexToName[class]
+		label := m.MetaData.TargetMap.IndexToName[int(data[i].Target)]
 		result[i] = prediction{
 			predictedClass: className,
 			label:          label,
