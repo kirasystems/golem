@@ -34,14 +34,13 @@ func mseLoss(g *ag.Graph, prediction ag.Node, target float64) ag.Node {
 }
 
 func lossFor(metadata *model.Metadata) lossFunc {
-	modelType := metadata.Columns[metadata.TargetColumn].Type
-	switch modelType {
+	switch metadata.TargetType() {
 	case model.Continuous:
 		return mseLoss
 	case model.Categorical:
 		return crossEntropyLoss
 	default:
-		log.Panicf("unsupported model type received: %d", modelType)
+		log.Panicf("unsupported model type received: %d", metadata.TargetType())
 		return nil
 	}
 }
@@ -76,7 +75,7 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 	//Overwrite values that are  only known after parsing the dataset
 	config.NumColumns = metaData.FeatureCount()
 	config.NumCategoricalEmbeddings = len(metaData.CategoricalValuesMap.ValueToIndex)
-	switch metaData.Columns[metaData.TargetColumn].Type {
+	switch metaData.TargetType() {
 	case model.Categorical:
 		config.OutputDimension = metaData.TargetMap.Size()
 	case model.Continuous:

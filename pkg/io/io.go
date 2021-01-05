@@ -202,7 +202,7 @@ func parseContinuousFeatures(metaData *model.Metadata, record []string, features
 func parseTarget(newMetadata bool, metaData *model.Metadata, target string) (float64, error) {
 
 	var parseFunc func(string) (float64, error)
-	switch metaData.Columns[metaData.TargetColumn].Type {
+	switch metaData.TargetType() {
 	case model.Categorical:
 		if newMetadata {
 			parseFunc = metaData.ParseOrAddCategoricalTarget

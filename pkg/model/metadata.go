@@ -175,5 +175,8 @@ func (d *Metadata) ParseOrAddCategoricalTarget(value string) (float64, error) {
 
 func (d *Metadata) ParseContinuousTarget(s string) (float64, error) {
 	return strconv.ParseFloat(s, 64)
+}
 
+func (d *Metadata) TargetType() ColumnType {
+	return d.Columns[d.TargetColumn].Type
 }
