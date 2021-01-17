@@ -1,6 +1,13 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+
 	"golem/pkg"
 	"golem/pkg/model"
 
@@ -74,12 +81,60 @@ func TestCommand() *cobra.Command {
 
 }
 
+var logLevel string
+var logFormat string
+
 func main() {
-	Main := &cobra.Command{Use: "golem"}
+
+	Main := &cobra.Command{Use: "golem", PersistentPreRun: setupLogging}
+
+	Main.PersistentFlags().StringVarP(&logLevel, "log-level", "", "info", "Logging level: info error or debug")
+	Main.PersistentFlags().StringVarP(&logFormat, "log-format", "", "pretty", "Logging format: pretty or json")
+
 	Main.AddCommand(TrainCommand())
 	Main.AddCommand(TestCommand())
 
 	if err := Main.Execute(); err != nil {
 		panic(err)
 	}
+}
+
+func setupLogging(cmd *cobra.Command, args []string) {
+
+	switch logLevel {
+	case "error":
+		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
+	case "debug":
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	case "info":
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	default:
+		panic("Invalid logging level specified")
+	}
+
+	switch logFormat {
+	case "pretty":
+		setupPrettyLogging()
+	case "json":
+	default:
+		panic("Invalid log format specified")
+
+	}
+
+}
+
+func setupPrettyLogging() {
+	writer := zerolog.ConsoleWriter{Out: os.Stderr}
+	writer.FormatFieldValue = func(i interface{}) string {
+		switch v := i.(type) {
+		case json.Number:
+			val, _ := v.Float64()
+			return fmt.Sprintf("%.3f", val)
+		default:
+			return fmt.Sprintf("%s", i)
+		}
+
+	}
+	log.Logger = log.Output(writer)
+
 }

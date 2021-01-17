@@ -3,7 +3,9 @@ package pkg
 import (
 	"golem/pkg/io"
 	"golem/pkg/model"
-	"log"
+
+	"github.com/rs/zerolog/log"
+
 	"os"
 
 	"github.com/nlpodyssey/spago/pkg/mat/rand"
@@ -40,7 +42,7 @@ func lossFor(metadata *model.Metadata) lossFunc {
 	case model.Categorical:
 		return crossEntropyLoss
 	default:
-		log.Panicf("unsupported model type received: %d", metadata.TargetType())
+		log.Panic().Msgf("unsupported model type received: %d", metadata.TargetType())
 		return nil
 	}
 }
@@ -64,12 +66,13 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 		BatchSize:          trainingParams.BatchSize}, nil)
 
 	if err != nil {
-		log.Fatalf("Error reading training data: %s", err)
+		log.Fatal().Msgf("Error reading training data: %s", err)
 		return
 	}
 	printDataErrors(dataErrors)
 	if len(data) == 0 {
-		log.Fatalf("No data to train")
+		log.Fatal().Msgf("No data to train")
+		return
 	}
 
 	//Overwrite values that are  only known after parsing the dataset
@@ -99,7 +102,10 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 			totalLoss, targetLoss, sparsityLoss := t.trainBatch(batch)
 			t.optimizer.Optimize()
 			if i%t.params.ReportInterval == 0 {
-				log.Printf("Epoch %d batch %d loss %.5f | %.5f | %.5f \n", epoch, i, totalLoss, targetLoss, sparsityLoss)
+				log.Info().Int("epoch", epoch).Int("batch", i).
+					Float64("totalLoss", totalLoss).
+					Float64("targetLoss", targetLoss).
+					Float64("sparsityLoss", sparsityLoss).Msgf("")
 			}
 		}
 	}
@@ -122,7 +128,8 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 
 	err = testInternal(&m, data, "")
 	if err != nil {
-		log.Fatalf(err.Error())
+		log.Fatal().Msg(err.Error())
+
 	}
 
 }

@@ -3,10 +3,11 @@ package pkg
 import (
 	"fmt"
 	gio "io"
-	"log"
+
 	"sort"
 
 	"github.com/nlpodyssey/spago/pkg/mat"
+	"github.com/rs/zerolog/log"
 	"gonum.org/v1/gonum/stat"
 
 	"golem/pkg/io"
@@ -24,6 +25,12 @@ type NoopWriter struct{}
 
 func (x NoopWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
+}
+
+func printDataErrors(errors []io.DataError) {
+	for _, err := range errors {
+		log.Error().Msgf("Error parsing data at line %d: %s\n", err.Line, err.Error)
+	}
 }
 
 func Test(modelFileName, inputFileName, outputFileName string) error {
@@ -48,14 +55,15 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 	}
 	printDataErrors(dataErrors)
 	if len(data) == 0 {
-		log.Fatalf("No data to test")
+		log.Fatal().Msg("No data to test")
+		return nil
 	}
 	return testInternal(model, data, outputFileName)
 }
 
 type modelEvaluator interface {
 	EvaluatePrediction(prediction ag.Node, record *io.DataRecord)
-	PrintMetrics(logger func(format string, v ...interface{}))
+	LogMetrics()
 	Loss() float64
 }
 
@@ -103,18 +111,26 @@ func (c *classificationEvaluator) EvaluatePrediction(node ag.Node, record *io.Da
 
 }
 
-func (c *classificationEvaluator) PrintMetrics(logger func(format string, v ...interface{})) {
+func (c *classificationEvaluator) LogMetrics() {
 	// Sort class names for deterministic output
 	sortedClasses := sortClasses(c.metrics)
 	for _, class := range sortedClasses {
 		result := c.metrics[class]
-		logger("Class %s: TP %d FP %d TN %d FN %d Precision %.3f Recall %.3f F1 %.3f\n",
-			class, result.TruePos, result.FalsePos, result.TrueNeg, result.FalseNeg, result.Precision(), result.Recall(),
-			result.F1Score())
+		log.Info().Str("Class", class).
+			Int("TP", result.TruePos).
+			Int("FP", result.FalsePos).
+			Int("TN", result.TrueNeg).
+			Int("FN", result.FalseNeg).
+			Float64("Precision", result.Precision()).
+			Float64("Recall", result.Recall()).
+			Float64("F1", result.F1Score()).
+			Msg("")
+
 	}
 
 	microF1, macroF1 := computeOverallF1(c.metrics)
-	logger("Macro F1: %.3f - Micro F1: %.3f", macroF1, microF1)
+	log.Info().Float64("MacroF1", macroF1).Float64("MicroF1", microF1).Msg("")
+
 }
 
 func (c *classificationEvaluator) Loss() float64 {
@@ -163,8 +179,9 @@ func testInternal(m *model.Model, data []io.DataBatch, outputFileName string) er
 		}
 	default:
 		evaluator = &regressionEvaluator{
-			lossFunc: lossFunc,
-			g:        g,
+			lossFunc:     lossFunc,
+			g:            g,
+			outputWriter: outputWriter,
 		}
 	}
 
@@ -176,8 +193,8 @@ func testInternal(m *model.Model, data []io.DataBatch, outputFileName string) er
 		g.Clear()
 
 	}
-	evaluator.PrintMetrics(log.Printf)
-	log.Printf("Loss %.5f", evaluator.Loss())
+	evaluator.LogMetrics()
+	log.Info().Float64("Loss", evaluator.Loss()).Msg("")
 
 	return nil
 }
@@ -216,19 +233,22 @@ type regressionEvaluator struct {
 	values          []float64
 	lossFunc        lossFunc
 	g               *ag.Graph
+	outputWriter    gio.Writer
 }
 
 func (r *regressionEvaluator) EvaluatePrediction(prediction ag.Node, record *io.DataRecord) {
-	log.Printf("Test: target %.3f prediction %.3f", record.Target, prediction.ScalarValue())
+	log.Debug().Float64("Target", record.Target).Float64("Prediction", prediction.ScalarValue()).Msg("")
+	fmt.Fprintf(r.outputWriter, "%f,%f\n", record.Target, prediction.ScalarValue())
+
 	r.estimated = append(r.estimated, prediction.ScalarValue())
 	r.values = append(r.values, record.Target)
 	r.loss += r.lossFunc(r.g, prediction, record.Target).ScalarValue()
 	r.predictionCount++
 }
 
-func (r *regressionEvaluator) PrintMetrics(logger func(format string, v ...interface{})) {
+func (r *regressionEvaluator) LogMetrics() {
 	r2 := stat.RSquaredFrom(r.estimated, r.values, nil)
-	logger("R-squared: %.3f", r2)
+	log.Info().Float64("R-squared", r2).Msg("")
 }
 
 func (r *regressionEvaluator) Loss() float64 {
