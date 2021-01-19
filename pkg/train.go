@@ -1,6 +1,8 @@
 package pkg
 
 import (
+	rand2 "math/rand"
+
 	"golem/pkg/io"
 	"golem/pkg/model"
 
@@ -59,7 +61,7 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 
 	rndGen := rand.NewLockedRand(trainingParams.RndSeed)
 
-	metaData, data, dataErrors, err := io.LoadData(io.DataParameters{
+	metaData, dataSet, dataErrors, err := io.LoadData(io.DataParameters{
 		DataFile:           trainFile,
 		TargetColumn:       targetColumn,
 		CategoricalColumns: io.NewSet(trainingParams.CategoricalColumns...),
@@ -70,10 +72,11 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 		return
 	}
 	printDataErrors(dataErrors)
-	if len(data) == 0 {
+	if len(dataSet.Data) == 0 {
 		log.Fatal().Msgf("No data to train")
 		return
 	}
+	dataSet.Rand = rand2.New(rand2.NewSource(int64(trainingParams.RndSeed)))
 
 	//Overwrite values that are  only known after parsing the dataset
 	config.NumColumns = metaData.FeatureCount()
@@ -97,8 +100,10 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 		gd.ClipGradByValue(GradientClipThreshold))
 
 	for epoch := 0; epoch < trainingParams.NumEpochs; epoch++ {
+		dataSet.ResetOrder(io.RandomOrder)
 		t.optimizer.IncEpoch()
-		for i, batch := range data {
+		i := 0
+		for batch := dataSet.Next(); len(batch) > 0; batch = dataSet.Next() {
 			totalLoss, targetLoss, sparsityLoss := t.trainBatch(batch)
 			t.optimizer.Optimize()
 			if i%t.params.ReportInterval == 0 {
@@ -107,6 +112,7 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 					Float64("targetLoss", targetLoss).
 					Float64("sparsityLoss", sparsityLoss).Msgf("")
 			}
+			i++
 		}
 	}
 
@@ -126,7 +132,7 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 		log.Printf("Error saving model to %s: %s", outputFileName, err)
 	}
 
-	err = testInternal(&m, data, "")
+	err = testInternal(&m, dataSet, "")
 	if err != nil {
 		log.Fatal().Msg(err.Error())
 

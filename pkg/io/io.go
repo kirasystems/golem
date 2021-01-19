@@ -4,10 +4,12 @@ import (
 	"encoding/csv"
 	"encoding/gob"
 	"fmt"
-	"golem/pkg/model"
 	"io"
+	"math/rand"
 	"os"
 	"strconv"
+
+	"golem/pkg/model"
 
 	"github.com/nlpodyssey/spago/pkg/mat"
 )
@@ -64,8 +66,51 @@ type DataError struct {
 	Error string
 }
 
+type DataSet struct {
+	Data         []*DataRecord
+	BatchSize    int
+	Rand         *rand.Rand
+	currentOrder []int
+	currentIndex int
+}
+
+type DatasetOrder int
+
+const (
+	OriginalOrder DatasetOrder = iota
+	RandomOrder
+)
+
+func (d *DataSet) ResetOrder(order DatasetOrder) {
+	switch order {
+	case OriginalOrder:
+		d.currentOrder = make([]int, len(d.Data))
+		for i := range d.currentOrder {
+			d.currentOrder[i] = i
+		}
+	case RandomOrder:
+		d.currentOrder = d.Rand.Perm(len(d.Data))
+	default:
+		panic("invalid dataset order received " + strconv.Itoa(int(order)))
+	}
+
+	d.currentIndex = 0
+}
+func (d *DataSet) Next() DataBatch {
+	batch := make(DataBatch, 0, d.BatchSize)
+	for ; d.currentIndex < len(d.Data) && len(batch) < d.BatchSize; d.currentIndex++ {
+		batch = append(batch, d.Data[d.currentOrder[d.currentIndex]])
+	}
+	return batch
+}
+
+func NewDataSet(data []*DataRecord, batchSize int) *DataSet {
+	ds := &DataSet{Data: data, BatchSize: batchSize}
+	return ds
+}
+
 // LoadData reads the train file and splits it into batches of at most BatchSize elements.
-func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []DataBatch, []DataError, error) {
+func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, *DataSet, []DataError, error) {
 
 	var errors []DataError
 	inputFile, err := os.Open(p.DataFile)
@@ -93,8 +138,7 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []Da
 		buildFeatureIndex(metaData)
 	}
 
-	var result []DataBatch
-	currentBatch := make(DataBatch, 0, p.BatchSize)
+	var data []*DataRecord
 	currentLine := 0
 
 	for record, err = reader.Read(); err == nil; record, err = reader.Read() {
@@ -131,19 +175,13 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, []Da
 			})
 			continue
 		}
-		currentBatch = append(currentBatch, &dataRecord)
-		if len(currentBatch) == p.BatchSize {
-			result = append(result, currentBatch)
-			currentBatch = make(DataBatch, 0, p.BatchSize)
-		}
+		data = append(data, &dataRecord)
 		currentLine++
 	}
 
-	if len(currentBatch) > 0 {
-		result = append(result, currentBatch)
-	}
+	dataSet := NewDataSet(data, p.BatchSize)
 
-	return metaData, result, errors, nil
+	return metaData, dataSet, errors, nil
 }
 
 func parseColumns(record []string, p DataParameters) []model.Column {

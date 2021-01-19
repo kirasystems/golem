@@ -44,7 +44,7 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 	if err != nil {
 		return fmt.Errorf("error loading model from file %s: %w", modelFileName, err)
 	}
-	_, data, dataErrors, err := io.LoadData(io.DataParameters{
+	_, dataSet, dataErrors, err := io.LoadData(io.DataParameters{
 		DataFile:           inputFileName,
 		TargetColumn:       model.MetaData.Columns[model.MetaData.TargetColumn].Name,
 		CategoricalColumns: nil,
@@ -54,11 +54,11 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 		return fmt.Errorf("error loading data from %s: %w", inputFileName, err)
 	}
 	printDataErrors(dataErrors)
-	if len(data) == 0 {
+	if len(dataSet.Data) == 0 {
 		log.Fatal().Msg("No data to test")
 		return nil
 	}
-	return testInternal(model, data, outputFileName)
+	return testInternal(model, dataSet, outputFileName)
 }
 
 type modelEvaluator interface {
@@ -149,7 +149,7 @@ func (c *classificationEvaluator) decode(modelOutput ag.Node, record *io.DataRec
 		maxLogit:       logit,
 	}
 }
-func testInternal(m *model.Model, data []io.DataBatch, outputFileName string) error {
+func testInternal(m *model.Model, dataSet *io.DataSet, outputFileName string) error {
 
 	var outputWriter gio.Writer
 	if outputFileName != "" {
@@ -185,8 +185,11 @@ func testInternal(m *model.Model, data []io.DataBatch, outputFileName string) er
 		}
 	}
 
-	for _, d := range data {
-		predictions := predict(g, m, d)
+	dataSet.ResetOrder(io.OriginalOrder)
+	ctx := nn.Context{Graph: g, Mode: nn.Inference}
+	proc := nn.Reify(ctx, m.TabNet).(*model.TabNet)
+	for d := dataSet.Next(); len(d) > 0; d = dataSet.Next() {
+		predictions := predict(g, proc, d)
 		for i, prediction := range predictions {
 			evaluator.EvaluatePrediction(prediction, d[i])
 		}
@@ -255,11 +258,9 @@ func (r *regressionEvaluator) Loss() float64 {
 	return r.loss / float64(r.predictionCount)
 }
 
-func predict(g *ag.Graph, m *model.Model, data io.DataBatch) []ag.Node {
-	input := createInputNodes(data, g, m.TabNet)
-	ctx := nn.Context{Graph: g, Mode: nn.Inference}
-	proc := nn.Reify(ctx, m.TabNet).(*model.TabNet)
-	result := proc.Forward(input)
+func predict(g *ag.Graph, m *model.TabNet, data io.DataBatch) []ag.Node {
+	input := createInputNodes(data, g, m)
+	result := m.Forward(input)
 	return result
 }
 
