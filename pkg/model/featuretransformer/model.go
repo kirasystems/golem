@@ -3,7 +3,8 @@ package featuretransformer
 import (
 	"math"
 
-	"github.com/nlpodyssey/spago/pkg/mat/rand"
+	mat "github.com/nlpodyssey/spago/pkg/mat32"
+	"github.com/nlpodyssey/spago/pkg/mat32/rand"
 	"github.com/nlpodyssey/spago/pkg/ml/ag"
 	"github.com/nlpodyssey/spago/pkg/ml/nn"
 	"github.com/nlpodyssey/spago/pkg/ml/nn/linear"
@@ -43,7 +44,7 @@ func New(numInputFeatures, featureDimension, numSteps int, batchMomentum float64
 func createBatchNormModels(steps, featureDimension int, batchMomentum float64) []*batchnorm.Model {
 	result := make([]*batchnorm.Model, steps)
 	for i := range result {
-		result[i] = batchnorm.NewWithMomentum(2*featureDimension, batchMomentum)
+		result[i] = batchnorm.NewWithMomentum(2*featureDimension, mat.Float(batchMomentum))
 	}
 	return result
 }
@@ -53,7 +54,7 @@ func (m *Model) Init(generator *rand.LockedRand) {
 	m.Layer2.Init(generator)
 }
 
-var SquareRootHalf = math.Sqrt(0.5)
+var SquareRootHalf = mat.Float(math.Sqrt(0.5))
 
 func (m *Model) Forward(step int, xs []ag.Node) []ag.Node {
 	return m.forward(step, xs, false)

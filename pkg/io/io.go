@@ -11,7 +11,7 @@ import (
 
 	"golem/pkg/model"
 
-	"github.com/nlpodyssey/spago/pkg/mat"
+	mat "github.com/nlpodyssey/spago/pkg/mat32"
 )
 
 // DataInstance holds data for a single data point.
@@ -30,7 +30,7 @@ type DataRecord struct {
 	// Target contains the target value.
 	// Float64 is used to represent valus for both continuous and categorical target types.
 
-	Target float64
+	Target mat.Float
 }
 
 // DataBatch holds a minibatch of data.
@@ -232,14 +232,14 @@ func parseContinuousFeatures(metaData *model.Metadata, record []string, features
 		if err != nil {
 			return fmt.Errorf("error parsing feature %s: %w", metaData.Columns[column].Name, err)
 		}
-		features.Set(index, 0, value)
+		features.Set(index, 0, mat.Float(value))
 	}
 	return nil
 }
 
-func parseTarget(newMetadata bool, metaData *model.Metadata, target string) (float64, error) {
+func parseTarget(newMetadata bool, metaData *model.Metadata, target string) (mat.Float, error) {
 
-	var parseFunc func(string) (float64, error)
+	var parseFunc func(string) (mat.Float, error)
 	switch metaData.TargetType() {
 	case model.Categorical:
 		if newMetadata {

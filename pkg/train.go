@@ -3,6 +3,8 @@ package pkg
 import (
 	rand2 "math/rand"
 
+	mat "github.com/nlpodyssey/spago/pkg/mat32"
+
 	"golem/pkg/io"
 	"golem/pkg/model"
 
@@ -10,7 +12,7 @@ import (
 
 	"os"
 
-	"github.com/nlpodyssey/spago/pkg/mat/rand"
+	"github.com/nlpodyssey/spago/pkg/mat32/rand"
 	"github.com/nlpodyssey/spago/pkg/ml/ag"
 	"github.com/nlpodyssey/spago/pkg/ml/losses"
 	"github.com/nlpodyssey/spago/pkg/ml/nn"
@@ -27,13 +29,13 @@ type TrainingParameters struct {
 	CategoricalColumns []string
 }
 
-type lossFunc func(g *ag.Graph, prediction ag.Node, target float64) ag.Node
+type lossFunc func(g *ag.Graph, prediction ag.Node, target mat.Float) ag.Node
 
-func crossEntropyLoss(g *ag.Graph, prediction ag.Node, target float64) ag.Node {
+func crossEntropyLoss(g *ag.Graph, prediction ag.Node, target mat.Float) ag.Node {
 	return losses.CrossEntropy(g, prediction, int(target))
 }
 
-func mseLoss(g *ag.Graph, prediction ag.Node, target float64) ag.Node {
+func mseLoss(g *ag.Graph, prediction ag.Node, target mat.Float) ag.Node {
 	return losses.MSE(g, prediction, g.NewScalar(target), false)
 }
 
@@ -93,7 +95,7 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 	t.model.Init(rndGen)
 
 	updaterConfig := adam.NewDefaultConfig() // TODO: `radam` may provide better results
-	updaterConfig.StepSize = trainingParams.LearningRate
+	updaterConfig.StepSize = mat.Float(trainingParams.LearningRate)
 	updater := adam.New(updaterConfig)
 	const GradientClipThreshold = 2000.0 // TODO: get from configuration
 	t.optimizer = gd.NewOptimizer(updater, nn.NewDefaultParamsIterator(t.model),
@@ -108,9 +110,9 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 			t.optimizer.Optimize()
 			if i%t.params.ReportInterval == 0 {
 				log.Info().Int("epoch", epoch).Int("batch", i).
-					Float64("totalLoss", totalLoss).
-					Float64("targetLoss", targetLoss).
-					Float64("sparsityLoss", sparsityLoss).Msgf("")
+					Float32("totalLoss", totalLoss).
+					Float32("targetLoss", targetLoss).
+					Float32("sparsityLoss", sparsityLoss).Msgf("")
 			}
 			i++
 		}
@@ -140,7 +142,7 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 
 }
 
-func (t *Trainer) trainBatch(batch io.DataBatch) (float64, float64, float64) {
+func (t *Trainer) trainBatch(batch io.DataBatch) (mat.Float, mat.Float, mat.Float) {
 	t.optimizer.IncBatch()
 
 	g := ag.NewGraph(ag.Rand(rand.NewLockedRand(t.params.RndSeed))) // TODO: we might use the same random generator among the batches until we run them concurrently
@@ -156,11 +158,11 @@ func (t *Trainer) trainBatch(batch io.DataBatch) (float64, float64, float64) {
 		targetLoss := t.lossFunc(g, prediction[i], batch[i].Target)
 		batchTargetLoss = g.Add(batchTargetLoss, targetLoss)
 		batchSparsityLoss = g.Add(batchSparsityLoss, modelProc.AttentionEntropy[i])
-		exampleAttentionEntropy := g.Mul(modelProc.AttentionEntropy[i], g.Constant(t.model.SparsityLossWeight))
+		exampleAttentionEntropy := g.Mul(modelProc.AttentionEntropy[i], g.Constant(mat.Float(t.model.SparsityLossWeight)))
 		exampleLoss := g.Add(targetLoss, exampleAttentionEntropy)
 		batchLoss = g.Add(batchLoss, exampleLoss)
 	}
-	batchSize := g.NewScalar(float64(len(batch)))
+	batchSize := g.NewScalar(mat.Float(len(batch)))
 	batchLoss = g.Div(batchLoss, batchSize)
 	batchTargetLoss = g.Div(batchTargetLoss, batchSize)
 	batchSparsityLoss = g.Div(batchSparsityLoss, batchSize)

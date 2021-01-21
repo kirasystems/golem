@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+
+	mat "github.com/nlpodyssey/spago/pkg/mat32"
 )
 
 // NameMap implements a bidirectional mapping between a name and an index
@@ -157,24 +159,28 @@ func (d *Metadata) FeatureCount() int {
 	return d.CategoricalFeaturesMap.Size() + d.ContinuousFeaturesMap.Size()
 }
 
-func (d *Metadata) ParseCategoricalTarget(value string) (float64, error) {
+func (d *Metadata) ParseCategoricalTarget(value string) (mat.Float, error) {
 	index, ok := d.TargetMap.ContainsName(value)
 	if !ok {
 		return 0, fmt.Errorf("unknown categorical target value %s", value)
 	}
-	return float64(index), nil
+	return mat.Float(index), nil
 }
 
 // ParseOrAddCategoricalTarget always succeeds by returning the existing or new
 // categorical target value index
-func (d *Metadata) ParseOrAddCategoricalTarget(value string) (float64, error) {
+func (d *Metadata) ParseOrAddCategoricalTarget(value string) (mat.Float, error) {
 	target, _ := d.TargetMap.ValueFor(value)
-	return float64(target), nil
+	return mat.Float(target), nil
 
 }
 
-func (d *Metadata) ParseContinuousTarget(s string) (float64, error) {
-	return strconv.ParseFloat(s, 64)
+func (d *Metadata) ParseContinuousTarget(s string) (mat.Float, error) {
+	v, err := strconv.ParseFloat(s, 32)
+	if err != nil {
+		return 0.0, err
+	}
+	return mat.Float(v), nil
 }
 
 func (d *Metadata) TargetType() ColumnType {

@@ -6,7 +6,7 @@ import (
 
 	"sort"
 
-	"github.com/nlpodyssey/spago/pkg/mat"
+	mat "github.com/nlpodyssey/spago/pkg/mat32"
 	"github.com/rs/zerolog/log"
 	"gonum.org/v1/gonum/stat"
 
@@ -15,7 +15,7 @@ import (
 
 	"os"
 
-	"github.com/nlpodyssey/spago/pkg/mat/rand"
+	rand "github.com/nlpodyssey/spago/pkg/mat32/rand"
 	"github.com/nlpodyssey/spago/pkg/ml/ag"
 	"github.com/nlpodyssey/spago/pkg/ml/nn"
 	"github.com/nlpodyssey/spago/pkg/ml/stats"
@@ -79,14 +79,14 @@ type classificationEvaluator struct {
 type classificationPrediction struct {
 	predictedClass string
 	label          string
-	labelValue     float64
+	labelValue     mat.Float
 	logits         mat.Matrix
-	maxLogit       float64
+	maxLogit       mat.Float
 }
 
 func (c *classificationEvaluator) EvaluatePrediction(node ag.Node, record *io.DataRecord) {
 	prediction := c.decode(node, record)
-	c.loss += c.lossFunc(c.g, c.g.NewVariable(prediction.logits, false), prediction.labelValue).ScalarValue()
+	c.loss += float64(c.lossFunc(c.g, c.g.NewVariable(prediction.logits, false), prediction.labelValue).ScalarValue())
 	c.predictionCount++
 
 	fmt.Fprintf(c.outputWriter, "%s,%s,%.5f\n", prediction.label, prediction.predictedClass, prediction.maxLogit)
@@ -121,9 +121,9 @@ func (c *classificationEvaluator) LogMetrics() {
 			Int("FP", result.FalsePos).
 			Int("TN", result.TrueNeg).
 			Int("FN", result.FalseNeg).
-			Float64("Precision", result.Precision()).
-			Float64("Recall", result.Recall()).
-			Float64("F1", result.F1Score()).
+			Float32("Precision", result.Precision()).
+			Float32("Recall", result.Recall()).
+			Float32("F1", result.F1Score()).
 			Msg("")
 
 	}
@@ -205,7 +205,7 @@ func testInternal(m *model.Model, dataSet *io.DataSet, outputFileName string) er
 func computeOverallF1(metrics map[string]*stats.ClassMetrics) (float64, float64) {
 	macroF1 := 0.0
 	for _, metric := range metrics {
-		macroF1 += metric.F1Score()
+		macroF1 += float64(metric.F1Score())
 	}
 	macroF1 /= float64(len(metrics))
 
@@ -216,7 +216,7 @@ func computeOverallF1(metrics map[string]*stats.ClassMetrics) (float64, float64)
 		micro.FalseNeg += result.FalseNeg
 		micro.TrueNeg += result.TrueNeg
 	}
-	return macroF1, micro.F1Score()
+	return macroF1, float64(micro.F1Score())
 
 }
 
@@ -230,17 +230,17 @@ func sortClasses(metrics map[string]*stats.ClassMetrics) []string {
 }
 
 type regressionEvaluator struct {
-	loss            float64
+	loss            mat.Float
 	predictionCount int
-	estimated       []float64
-	values          []float64
+	estimated       []mat.Float
+	values          []mat.Float
 	lossFunc        lossFunc
 	g               *ag.Graph
 	outputWriter    gio.Writer
 }
 
 func (r *regressionEvaluator) EvaluatePrediction(prediction ag.Node, record *io.DataRecord) {
-	log.Debug().Float64("Target", record.Target).Float64("Prediction", prediction.ScalarValue()).Msg("")
+	log.Debug().Float64("Target", float64(record.Target)).Float64("Prediction", float64(prediction.ScalarValue())).Msg("")
 	fmt.Fprintf(r.outputWriter, "%f,%f\n", record.Target, prediction.ScalarValue())
 
 	r.estimated = append(r.estimated, prediction.ScalarValue())
@@ -250,12 +250,20 @@ func (r *regressionEvaluator) EvaluatePrediction(prediction ag.Node, record *io.
 }
 
 func (r *regressionEvaluator) LogMetrics() {
-	r2 := stat.RSquaredFrom(r.estimated, r.values, nil)
+	estimated := make([]float64, len(r.estimated))
+	values := make([]float64, len(r.values))
+	for i := range r.estimated {
+		estimated[i] = float64(r.estimated[i])
+	}
+	for i := range r.values {
+		values[i] = float64(r.values[i])
+	}
+	r2 := stat.RSquaredFrom(estimated, values, nil)
 	log.Info().Float64("R-squared", r2).Msg("")
 }
 
 func (r *regressionEvaluator) Loss() float64 {
-	return r.loss / float64(r.predictionCount)
+	return float64(r.loss) / float64(r.predictionCount)
 }
 
 func predict(g *ag.Graph, m *model.TabNet, data io.DataBatch) []ag.Node {
@@ -264,7 +272,7 @@ func predict(g *ag.Graph, m *model.TabNet, data io.DataBatch) []ag.Node {
 	return result
 }
 
-func argmax(data []float64) (int, float64) {
+func argmax(data []mat.Float) (int, mat.Float) {
 	maxInd := 0
 	for i := range data {
 		if data[i] > data[maxInd] {

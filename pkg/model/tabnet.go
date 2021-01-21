@@ -3,8 +3,8 @@ package model
 import (
 	"golem/pkg/model/featuretransformer"
 
-	"github.com/nlpodyssey/spago/pkg/mat"
-	"github.com/nlpodyssey/spago/pkg/mat/rand"
+	mat "github.com/nlpodyssey/spago/pkg/mat32"
+	"github.com/nlpodyssey/spago/pkg/mat32/rand"
 	"github.com/nlpodyssey/spago/pkg/ml/ag"
 	"github.com/nlpodyssey/spago/pkg/ml/initializers"
 	"github.com/nlpodyssey/spago/pkg/ml/nn"
@@ -51,7 +51,7 @@ type TabNetConfig struct {
 func NewTabNet(config TabNetConfig) *TabNet {
 	return &TabNet{
 		TabNetConfig:                 config,
-		FeatureBatchNorm:             batchnorm.NewWithMomentum(config.NumColumns, config.BatchMomentum),
+		FeatureBatchNorm:             batchnorm.NewWithMomentum(config.NumColumns, mat.Float(config.BatchMomentum)),
 		SharedFeatureTransformer:     featuretransformer.New(config.NumColumns, config.IntermediateFeatureDimension, config.NumDecisionSteps, config.BatchMomentum),
 		StepFeatureTransformers:      newStepFeatureTransformers(config),
 		AttentionTransformer:         createLinearTransformers(config),
@@ -64,7 +64,7 @@ func NewTabNet(config TabNetConfig) *TabNet {
 func createBatchNormModels(config TabNetConfig) []*batchnorm.Model {
 	result := make([]*batchnorm.Model, config.NumDecisionSteps)
 	for i := range result {
-		result[i] = batchnorm.NewWithMomentum(config.NumColumns, config.BatchMomentum)
+		result[i] = batchnorm.NewWithMomentum(config.NumColumns, mat.Float(config.BatchMomentum))
 	}
 	return result
 
@@ -146,10 +146,10 @@ func (m *TabNet) Forward(xs []ag.Node) []ag.Node {
 			mask[k] = g.Prod(mask[k], complementaryAggregatedMaskValues[k])
 			mask[k] = g.SparseMax(mask[k])
 			complementaryAggregatedMaskValues[k] = g.Prod(complementaryAggregatedMaskValues[k],
-				g.Neg(g.SubScalar(mask[k], g.Constant(m.RelaxationFactor))))
+				g.Neg(g.SubScalar(mask[k], g.Constant(mat.Float(m.RelaxationFactor)))))
 			maskedFeatures[k] = g.Prod(input[k], mask[k])
 			stepAttentionEntropy := g.ReduceSum(g.Prod(g.Neg(mask[k]), g.Log(g.AddScalar(mask[k], g.Constant(Epsilon)))))
-			stepAttentionEntropy = g.DivScalar(stepAttentionEntropy, g.Constant(float64(m.NumDecisionSteps-1)))
+			stepAttentionEntropy = g.DivScalar(stepAttentionEntropy, g.Constant(mat.Float(float64(m.NumDecisionSteps-1))))
 			m.AttentionEntropy[k] = g.Add(m.AttentionEntropy[k], stepAttentionEntropy)
 		}
 	}
