@@ -4,6 +4,7 @@ import (
 	"math/rand"
 	"testing"
 
+	mat "github.com/nlpodyssey/spago/pkg/mat32"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,14 +37,14 @@ func TestDataSet(t *testing.T) {
 	data := make([]*DataRecord, 100)
 	for i := range data {
 		data[i] = &DataRecord{
-			Target: float64(i),
+			Target: mat.Float(i),
 		}
 	}
 
 	ds := NewDataSet(data, 10)
 	ds.Rand = rand.New(rand.NewSource(42))
 	ds.ResetOrder(RandomOrder)
-	order1 := make([]float64, 0, 100)
+	order1 := make([]mat.Float, 0, 100)
 
 	for b := ds.Next(); len(b) > 0; b = ds.Next() {
 		for _, d := range b {
@@ -51,7 +52,7 @@ func TestDataSet(t *testing.T) {
 		}
 	}
 	ds.ResetOrder(RandomOrder)
-	order2 := make([]float64, 0, 100)
+	order2 := make([]mat.Float, 0, 100)
 
 	for b := ds.Next(); len(b) > 0; b = ds.Next() {
 		for _, d := range b {
@@ -64,7 +65,7 @@ func TestDataSet(t *testing.T) {
 	require.NotEqual(t, order1, order2)
 
 	ds.ResetOrder(OriginalOrder)
-	order3 := make([]float64, 0, 100)
+	order3 := make([]mat.Float, 0, 100)
 
 	for b := ds.Next(); len(b) > 0; b = ds.Next() {
 		for _, d := range b {
@@ -74,7 +75,7 @@ func TestDataSet(t *testing.T) {
 
 	require.Equal(t, 100, len(order3))
 	for i, v := range order3 {
-		require.Equal(t, float64(i), v)
+		require.Equal(t, mat.Float(i), v)
 	}
 
 }
