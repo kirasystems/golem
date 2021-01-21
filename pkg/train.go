@@ -99,7 +99,8 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 	updater := adam.New(updaterConfig)
 	const GradientClipThreshold = 2000.0 // TODO: get from configuration
 	t.optimizer = gd.NewOptimizer(updater, nn.NewDefaultParamsIterator(t.model),
-		gd.ClipGradByValue(GradientClipThreshold))
+		gd.ClipGradByValue(GradientClipThreshold),
+		gd.ConcurrentComputations(1))
 
 	for epoch := 0; epoch < trainingParams.NumEpochs; epoch++ {
 		dataSet.ResetOrder(io.RandomOrder)
@@ -145,7 +146,9 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 func (t *Trainer) trainBatch(batch io.DataBatch) (mat.Float, mat.Float, mat.Float) {
 	t.optimizer.IncBatch()
 
-	g := ag.NewGraph(ag.Rand(rand.NewLockedRand(t.params.RndSeed))) // TODO: we might use the same random generator among the batches until we run them concurrently
+	g := ag.NewGraph(
+		ag.Rand(rand.NewLockedRand(t.params.RndSeed)),
+		ag.ConcurrentComputations(1)) // TODO: we might use the same random generator among the batches until we run them concurrently
 	defer g.Clear()
 
 	input := createInputNodes(batch, g, t.model)
