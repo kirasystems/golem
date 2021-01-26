@@ -3,6 +3,7 @@ package pkg
 import (
 	"fmt"
 	gio "io"
+	"math"
 
 	"sort"
 
@@ -75,6 +76,7 @@ type classificationEvaluator struct {
 	lossFunc        lossFunc
 	g               *ag.Graph
 	outputWriter    gio.Writer
+	wroteHeader     bool
 }
 type classificationPrediction struct {
 	predictedClass string
@@ -89,7 +91,7 @@ func (c *classificationEvaluator) EvaluatePrediction(node ag.Node, record *io.Da
 	c.loss += float64(c.lossFunc(c.g, c.g.NewVariable(prediction.logits, false), prediction.labelValue).ScalarValue())
 	c.predictionCount++
 
-	fmt.Fprintf(c.outputWriter, "%s,%s,%.5f\n", prediction.label, prediction.predictedClass, prediction.maxLogit)
+	c.writeOutput(prediction)
 
 	labelClassMetrics, ok := c.metrics[prediction.label]
 	if !ok {
@@ -148,6 +150,22 @@ func (c *classificationEvaluator) decode(modelOutput ag.Node, record *io.DataRec
 		logits:         modelOutput.Value().Clone(),
 		maxLogit:       logit,
 	}
+}
+
+func (c *classificationEvaluator) writeOutput(prediction classificationPrediction) {
+
+	if !c.wroteHeader {
+		fmt.Fprintf(c.outputWriter, "label,predicted,probability\n")
+		c.wroteHeader = true
+	}
+	fmt.Fprintf(c.outputWriter, "%s,%s,%.5f\n", prediction.label, prediction.predictedClass, toProbability(prediction.maxLogit))
+
+}
+
+func toProbability(logit mat.Float) float64 {
+	v := math.Exp(float64(logit))
+	return v / (1.0 + v)
+
 }
 func testInternal(m *model.Model, dataSet *io.DataSet, outputFileName string) error {
 
@@ -237,11 +255,12 @@ type regressionEvaluator struct {
 	lossFunc        lossFunc
 	g               *ag.Graph
 	outputWriter    gio.Writer
+	wroteHeader     bool
 }
 
 func (r *regressionEvaluator) EvaluatePrediction(prediction ag.Node, record *io.DataRecord) {
 	log.Debug().Float64("Target", float64(record.Target)).Float64("Prediction", float64(prediction.ScalarValue())).Msg("")
-	fmt.Fprintf(r.outputWriter, "%f,%f\n", record.Target, prediction.ScalarValue())
+	r.writeOutput(record, prediction.ScalarValue())
 
 	r.estimated = append(r.estimated, prediction.ScalarValue())
 	r.values = append(r.values, record.Target)
@@ -264,6 +283,14 @@ func (r *regressionEvaluator) LogMetrics() {
 
 func (r *regressionEvaluator) Loss() float64 {
 	return float64(r.loss) / float64(r.predictionCount)
+}
+
+func (r *regressionEvaluator) writeOutput(record *io.DataRecord, prediction mat.Float) {
+	if !r.wroteHeader {
+		fmt.Fprintf(r.outputWriter, "label,prediction\n")
+		r.wroteHeader = true
+	}
+	fmt.Fprintf(r.outputWriter, "%f,%f\n", record.Target, prediction)
 }
 
 func predict(g *ag.Graph, m *model.TabNet, data io.DataBatch) []ag.Node {
