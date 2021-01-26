@@ -62,19 +62,22 @@ func TestCommand() *cobra.Command {
 	var modelFile string
 	var inputFile string
 	var outputFile string
+	var attentionMapFile string
 
 	var cmd = &cobra.Command{
-		Use:   "test -m modelFile -i trainFile [-o outputFile]",
-		Short: "Runs the provided model on the specified data input and stores the results in the output file if provided, or stdout",
+		Use:   "test -m modelFile -i trainFile [-o outputFile] [-a attentionOutputFile]",
+		Short: "Runs the provided model on the specified data input and optionally writes the results and attention map",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return pkg.Test(modelFile, inputFile, outputFile)
+			return pkg.Test(modelFile, inputFile, outputFile, attentionMapFile)
 		},
 	}
 
 	cmd.Flags().StringVarP(&modelFile, "model", "m", "", "name of model to test")
 	cmd.Flags().StringVarP(&inputFile, "input", "i", "", "name of data input file (optional, uses stdin if not present)")
-	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "name of output file (optional, uses stdout if not present)")
+	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "name of output file (optional)")
+	cmd.Flags().StringVarP(&attentionMapFile, "attentionMap", "a", "", "name of attention map output file (optional)")
+
 	_ = cmd.MarkFlagRequired("model")
 
 	return cmd

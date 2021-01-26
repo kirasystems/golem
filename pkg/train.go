@@ -135,7 +135,7 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 		log.Printf("Error saving model to %s: %s", outputFileName, err)
 	}
 
-	err = testInternal(&m, dataSet, "")
+	err = testInternal(&m, dataSet, "", "")
 	if err != nil {
 		log.Fatal().Msg(err.Error())
 

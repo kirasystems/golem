@@ -29,6 +29,10 @@ type TabNet struct {
 	OutputLayer                  *linear.Model
 	CategoricalFeatureEmbeddings []nn.Param `spago:"type:weights"`
 	AttentionEntropy             []ag.Node  `spago:"scope:processor"`
+
+	// AttentionMasks holds, after Forward, the feature attention masks.
+	// first dimension is instance, second is step, third is feature
+	AttentionMasks [][][]mat.Float `spago:"scope:processor"`
 }
 
 // sharedTransformerProcessor no residual
@@ -114,6 +118,12 @@ func (m *TabNet) Init(generator *rand.LockedRand) {
 func (m *TabNet) Forward(xs []ag.Node) []ag.Node {
 	g := m.Graph()
 
+	if m.Mode() == nn.Inference {
+		if len(m.AttentionMasks) != len(xs) {
+			m.allocateAttentionMasks(len(xs))
+		}
+	}
+
 	input := m.FeatureBatchNorm.Forward(xs...)
 
 	complementaryAggregatedMaskValues := make([]ag.Node, len(xs))
@@ -145,6 +155,9 @@ func (m *TabNet) Forward(xs []ag.Node) []ag.Node {
 		for k := range mask {
 			mask[k] = g.Prod(mask[k], complementaryAggregatedMaskValues[k])
 			mask[k] = g.SparseMax(mask[k])
+			if m.Mode() == nn.Inference {
+				copy(m.AttentionMasks[k][i], mask[k].Value().Data())
+			}
 			complementaryAggregatedMaskValues[k] = g.Prod(complementaryAggregatedMaskValues[k],
 				g.Neg(g.SubScalar(mask[k], g.Constant(mat.Float(m.RelaxationFactor)))))
 			maskedFeatures[k] = g.Prod(input[k], mask[k])
@@ -164,4 +177,15 @@ func (m *TabNet) copy(xs []ag.Node) []ag.Node {
 		ys[i] = m.Graph().Identity(x)
 	}
 	return ys
+}
+
+func (m *TabNet) allocateAttentionMasks(len int) {
+	m.AttentionMasks = make([][][]mat.Float, len)
+	for i := range m.AttentionMasks {
+		m.AttentionMasks[i] = make([][]mat.Float, m.NumDecisionSteps-1)
+		for j := range m.AttentionMasks[i] {
+			m.AttentionMasks[i][j] = make([]mat.Float, m.NumColumns)
+		}
+	}
+
 }

@@ -34,7 +34,7 @@ func printDataErrors(errors []io.DataError) {
 	}
 }
 
-func Test(modelFileName, inputFileName, outputFileName string) error {
+func Test(modelFileName, inputFileName, outputFileName string, attentionFileName string) error {
 
 	modelFile, err := os.Open(modelFileName)
 	if err != nil {
@@ -59,7 +59,7 @@ func Test(modelFileName, inputFileName, outputFileName string) error {
 		log.Fatal().Msg("No data to test")
 		return nil
 	}
-	return testInternal(model, dataSet, outputFileName)
+	return testInternal(model, dataSet, outputFileName, attentionFileName)
 }
 
 type modelEvaluator interface {
@@ -167,18 +167,36 @@ func toProbability(logit mat.Float) float64 {
 	return v / (1.0 + v)
 
 }
-func testInternal(m *model.Model, dataSet *io.DataSet, outputFileName string) error {
+func testInternal(m *model.Model, dataSet *io.DataSet, outputFileName, attentionFileName string) error {
 
-	var outputWriter gio.Writer
+	var predictionOutput gio.Writer
+	var attentionOutput gio.Writer
+
 	if outputFileName != "" {
 		outputFile, err := os.Create(outputFileName)
 		if err != nil {
 			return fmt.Errorf("error opening output file %s: %w", outputFileName, err)
 		}
 		defer outputFile.Close()
-		outputWriter = outputFile
+		predictionOutput = outputFile
 	} else {
-		outputWriter = NoopWriter{}
+		predictionOutput = NoopWriter{}
+	}
+
+	if attentionFileName != "" {
+		attentionFile, err := os.Create(attentionFileName)
+		if err != nil {
+			return fmt.Errorf("error creating attention output file %s:%w", attentionFileName, err)
+		}
+		defer attentionFile.Close()
+		attentionOutput = attentionFile
+	} else {
+		attentionOutput = NoopWriter{}
+	}
+
+	attnWriter := &attentionWriter{
+		outputWriter: attentionOutput,
+		metaData:     m.MetaData,
 	}
 
 	lossFunc := lossFor(m.MetaData)
@@ -193,13 +211,13 @@ func testInternal(m *model.Model, dataSet *io.DataSet, outputFileName string) er
 			model:        m,
 			lossFunc:     lossFunc,
 			g:            g,
-			outputWriter: outputWriter,
+			outputWriter: predictionOutput,
 		}
 	default:
 		evaluator = &regressionEvaluator{
 			lossFunc:     lossFunc,
 			g:            g,
-			outputWriter: outputWriter,
+			outputWriter: predictionOutput,
 		}
 	}
 
@@ -207,9 +225,10 @@ func testInternal(m *model.Model, dataSet *io.DataSet, outputFileName string) er
 	ctx := nn.Context{Graph: g, Mode: nn.Inference}
 	proc := nn.Reify(ctx, m.TabNet).(*model.TabNet)
 	for d := dataSet.Next(); len(d) > 0; d = dataSet.Next() {
-		predictions := predict(g, proc, d)
+		predictions, attentionMasks := predict(g, proc, d)
 		for i, prediction := range predictions {
 			evaluator.EvaluatePrediction(prediction, d[i])
+			attnWriter.writeAttentionMap(attentionMasks[i])
 		}
 		g.Clear()
 
@@ -293,10 +312,51 @@ func (r *regressionEvaluator) writeOutput(record *io.DataRecord, prediction mat.
 	fmt.Fprintf(r.outputWriter, "%f,%f\n", record.Target, prediction)
 }
 
-func predict(g *ag.Graph, m *model.TabNet, data io.DataBatch) []ag.Node {
+func predict(g *ag.Graph, m *model.TabNet, data io.DataBatch) ([]ag.Node, [][][]mat.Float) {
 	input := createInputNodes(data, g, m)
 	result := m.Forward(input)
-	return result
+	return result, m.AttentionMasks
+}
+
+type attentionWriter struct {
+	outputWriter gio.Writer
+	line         int
+	wroteHeader  bool
+	metaData     *model.Metadata
+}
+
+func (w *attentionWriter) writeAttentionMap(att [][]mat.Float) {
+	w.writeHeader()
+	for i := range att {
+		fmt.Fprintf(w.outputWriter, "%d,%d,", w.line, i)
+		for j := range att[i] {
+			fmt.Fprintf(w.outputWriter, "%.3f", att[i][j])
+			if j < len(att[i])-1 {
+				fmt.Fprintf(w.outputWriter, ",")
+			}
+		}
+		fmt.Fprintf(w.outputWriter, "\n")
+	}
+	w.line++
+
+}
+
+func (w *attentionWriter) writeHeader() {
+	if w.wroteHeader {
+		return
+	}
+	fmt.Fprintf(w.outputWriter, "line,step,")
+	for i := range w.metaData.Columns {
+		if i != w.metaData.TargetColumn {
+			fmt.Fprintf(w.outputWriter, "%s", w.metaData.Columns[i].Name)
+			if i < len(w.metaData.Columns)-2 {
+				fmt.Fprintf(w.outputWriter, ",")
+			}
+		}
+	}
+	fmt.Fprintf(w.outputWriter, "\n")
+	w.wroteHeader = true
+
 }
 
 func argmax(data []mat.Float) (int, mat.Float) {
