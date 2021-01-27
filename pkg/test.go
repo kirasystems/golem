@@ -228,7 +228,7 @@ func testInternal(m *model.Model, dataSet *io.DataSet, outputFileName, attention
 		predictions, attentionMasks := predict(g, proc, d)
 		for i, prediction := range predictions {
 			evaluator.EvaluatePrediction(prediction, d[i])
-			attnWriter.writeAttentionMap(attentionMasks[i])
+			attnWriter.writeStepAttentionMap(attentionMasks[i])
 		}
 		g.Clear()
 
@@ -312,7 +312,7 @@ func (r *regressionEvaluator) writeOutput(record *io.DataRecord, prediction mat.
 	fmt.Fprintf(r.outputWriter, "%f,%f\n", record.Target, prediction)
 }
 
-func predict(g *ag.Graph, m *model.TabNet, data io.DataBatch) ([]ag.Node, [][][]mat.Float) {
+func predict(g *ag.Graph, m *model.TabNet, data io.DataBatch) ([]ag.Node, []model.AttentionMask) {
 	input := createInputNodes(data, g, m)
 	result := m.Forward(input)
 	return result, m.AttentionMasks
@@ -325,13 +325,13 @@ type attentionWriter struct {
 	metaData     *model.Metadata
 }
 
-func (w *attentionWriter) writeAttentionMap(att [][]mat.Float) {
+func (w *attentionWriter) writeStepAttentionMap(att model.AttentionMask) {
 	w.writeHeader()
 	for i := range att {
 		fmt.Fprintf(w.outputWriter, "%d,%d,", w.line, i)
-		for j := range att[i] {
-			fmt.Fprintf(w.outputWriter, "%.3f", att[i][j])
-			if j < len(att[i])-1 {
+		for step := range att[i] {
+			fmt.Fprintf(w.outputWriter, "%.3f", att[i][step])
+			if step < len(att[i])-1 {
 				fmt.Fprintf(w.outputWriter, ",")
 			}
 		}

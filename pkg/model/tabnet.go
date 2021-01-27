@@ -21,7 +21,8 @@ var (
 type TabNet struct {
 	nn.BaseModel
 	TabNetConfig
-	FeatureBatchNorm             *batchnorm.Model
+	FeatureBatchNorm *batchnorm.Model
+
 	SharedFeatureTransformer     *featuretransformer.Model
 	StepFeatureTransformers      []*featuretransformer.Model
 	AttentionTransformer         []*linear.Model
@@ -32,10 +33,8 @@ type TabNet struct {
 
 	// AttentionMasks holds, after Forward, the feature attention masks.
 	// first dimension is instance, second is step, third is feature
-	AttentionMasks [][][]mat.Float `spago:"scope:processor"`
+	AttentionMasks []AttentionMask `spago:"scope:processor"`
 }
-
-// sharedTransformerProcessor no residual
 
 const Epsilon = 0.00001
 
@@ -115,6 +114,17 @@ func (m *TabNet) Init(generator *rand.LockedRand) {
 	}
 }
 
+type StepAttentionMask []mat.Float
+type AttentionMask []StepAttentionMask
+
+func NewAttentionMask(numSteps, numCols int) AttentionMask {
+	mask := make(AttentionMask, numSteps)
+	for step := range mask {
+		mask[step] = make(StepAttentionMask, numCols)
+	}
+	return mask
+}
+
 func (m *TabNet) Forward(xs []ag.Node) []ag.Node {
 	g := m.Graph()
 
@@ -180,12 +190,8 @@ func (m *TabNet) copy(xs []ag.Node) []ag.Node {
 }
 
 func (m *TabNet) allocateAttentionMasks(len int) {
-	m.AttentionMasks = make([][][]mat.Float, len)
+	m.AttentionMasks = make([]AttentionMask, len)
 	for i := range m.AttentionMasks {
-		m.AttentionMasks[i] = make([][]mat.Float, m.NumDecisionSteps-1)
-		for j := range m.AttentionMasks[i] {
-			m.AttentionMasks[i][j] = make([]mat.Float, m.NumColumns)
-		}
+		m.AttentionMasks[i] = NewAttentionMask(m.NumDecisionSteps-1, m.NumColumns)
 	}
-
 }
