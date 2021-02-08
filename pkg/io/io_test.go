@@ -79,3 +79,35 @@ func TestDataSet(t *testing.T) {
 	}
 
 }
+
+func TestDataSet_RandomSplit(t *testing.T) {
+	data := make([]*DataRecord, 1000)
+	for i := range data {
+		data[i] = &DataRecord{
+			Target: mat.Float(i),
+		}
+	}
+	ds := NewDataSet(data, 10)
+	ds.Rand = rand.New(rand.NewSource(42))
+
+	splits := ds.RandomSplit(500, 500)
+	require.Equal(t, 2, len(splits))
+	require.Equal(t, 500, splits[0].Size())
+	require.Equal(t, 500, splits[1].Size())
+
+	order1 := extractOrder(splits[0])
+	order2 := extractOrder(splits[1])
+
+	require.NotEqual(t, order1, order2)
+
+}
+
+func extractOrder(split *DataSet) []mat.Float {
+	order := make([]mat.Float, 0)
+	for b := split.Next(); len(b) > 0; b = split.Next() {
+		for _, d := range b {
+			order = append(order, d.Target)
+		}
+	}
+	return order
+}

@@ -5,7 +5,6 @@ import (
 	"encoding/gob"
 	"fmt"
 	"io"
-	"math/rand"
 	"os"
 	"strconv"
 
@@ -64,49 +63,6 @@ type DataParameters struct {
 type DataError struct {
 	Line  int
 	Error string
-}
-
-type DataSet struct {
-	Data         []*DataRecord
-	BatchSize    int
-	Rand         *rand.Rand
-	currentOrder []int
-	currentIndex int
-}
-
-type DatasetOrder int
-
-const (
-	OriginalOrder DatasetOrder = iota
-	RandomOrder
-)
-
-func (d *DataSet) ResetOrder(order DatasetOrder) {
-	switch order {
-	case OriginalOrder:
-		d.currentOrder = make([]int, len(d.Data))
-		for i := range d.currentOrder {
-			d.currentOrder[i] = i
-		}
-	case RandomOrder:
-		d.currentOrder = d.Rand.Perm(len(d.Data))
-	default:
-		panic("invalid dataset order received " + strconv.Itoa(int(order)))
-	}
-
-	d.currentIndex = 0
-}
-func (d *DataSet) Next() DataBatch {
-	batch := make(DataBatch, 0, d.BatchSize)
-	for ; d.currentIndex < len(d.Data) && len(batch) < d.BatchSize; d.currentIndex++ {
-		batch = append(batch, d.Data[d.currentOrder[d.currentIndex]])
-	}
-	return batch
-}
-
-func NewDataSet(data []*DataRecord, batchSize int) *DataSet {
-	ds := &DataSet{Data: data, BatchSize: batchSize}
-	return ds
 }
 
 // LoadData reads the train file and splits it into batches of at most BatchSize elements.
