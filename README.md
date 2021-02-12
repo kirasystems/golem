@@ -1,6 +1,6 @@
 # Golem
 
-Golem is a batteries-included implementation of "TabNet: Attentive Interpretable Tabular Learning" - https://arxiv.org/abs/1908.07442
+Golem is a batteries-included implementation of ["TabNet: Attentive Interpretable Tabular Learning"](https://arxiv.org/abs/1908.07442)
 
 Some things set Golam apart from other TabNet implementations:
 
