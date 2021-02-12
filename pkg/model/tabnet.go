@@ -32,7 +32,6 @@ type TabNet struct {
 	AttentionEntropy             []ag.Node  `spago:"scope:processor"`
 
 	// AttentionMasks holds, after Forward, the feature attention masks.
-	// first dimension is instance, second is step, third is feature
 	AttentionMasks []AttentionMask `spago:"scope:processor"`
 }
 
