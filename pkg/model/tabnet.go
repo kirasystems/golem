@@ -1,6 +1,7 @@
 package model
 
 import (
+	"golem/pkg/model/decoder"
 	"golem/pkg/model/featuretransformer"
 
 	mat "github.com/nlpodyssey/spago/pkg/mat32"
@@ -27,6 +28,7 @@ type TabNet struct {
 	StepFeatureTransformers      []*featuretransformer.Model
 	AttentionTransformer         []*linear.Model
 	AttentionBatchNorm           []*batchnorm.Model
+	Decoders                     []*decoder.Model
 	OutputLayer                  *linear.Model
 	CategoricalFeatureEmbeddings []nn.Param `spago:"type:weights"`
 	AttentionEntropy             []ag.Node  `spago:"scope:processor"`
@@ -48,6 +50,7 @@ type TabNetConfig struct {
 	BatchMomentum                 float64
 	VirtualBatchSize              int
 	SparsityLossWeight            float64
+	UseDecoders                   bool
 }
 
 func NewTabNet(config TabNetConfig) *TabNet {
@@ -58,9 +61,29 @@ func NewTabNet(config TabNetConfig) *TabNet {
 		StepFeatureTransformers:      newStepFeatureTransformers(config),
 		AttentionTransformer:         createLinearTransformers(config),
 		AttentionBatchNorm:           createBatchNormModels(config),
-		OutputLayer:                  linear.New(config.IntermediateFeatureDimension, config.OutputDimension, linear.BiasGrad(false)),
+		OutputLayer:                  createOutputLayer(config),
+		Decoders:                     createDecoders(config),
 		CategoricalFeatureEmbeddings: newCategoricalFeatureEmbeddings(config),
 	}
+}
+
+func createDecoders(config TabNetConfig) []*decoder.Model {
+	if !config.UseDecoders {
+		return nil
+	}
+	decoders := make([]*decoder.Model, config.NumDecisionSteps)
+	for i := range decoders {
+		decoders[i] = decoder.NewDecoder(config.IntermediateFeatureDimension, config.IntermediateFeatureDimension, config.NumColumns, config.BatchMomentum)
+	}
+	return decoders
+
+}
+
+func createOutputLayer(config TabNetConfig) *linear.Model {
+	if !config.UseDecoders {
+		return linear.New(config.IntermediateFeatureDimension, config.OutputDimension, linear.BiasGrad(false))
+	}
+	return nil
 }
 
 func createBatchNormModels(config TabNetConfig) []*batchnorm.Model {
@@ -149,11 +172,17 @@ func (m *TabNet) Forward(xs []ag.Node) []ag.Node {
 		transformed = m.StepFeatureTransformers[i].Forward(0, transformed)
 
 		if i > 0 {
-			decision := make([]ag.Node, len(xs))
-			for k := range xs {
-				decision[k] = g.ReLU(transformed[k])
-				outputAggregated[k] = g.Add(outputAggregated[k], decision[k])
+			if !m.UseDecoders {
+				for k := range xs {
+					outputAggregated[k] = g.Add(outputAggregated[k], g.ReLU(transformed[k]))
+				}
+			} else {
+				decoded := m.Decoders[i].Forward(transformed)
+				for k := range xs {
+					outputAggregated[k] = g.Add(outputAggregated[k], decoded[k])
+				}
 			}
+
 		}
 
 		if i == m.NumDecisionSteps-1 {
@@ -176,7 +205,11 @@ func (m *TabNet) Forward(xs []ag.Node) []ag.Node {
 		}
 	}
 
-	return m.OutputLayer.Forward(outputAggregated...)
+	if m.OutputLayer != nil {
+		outputAggregated = m.OutputLayer.Forward(outputAggregated...)
+	}
+	return outputAggregated
+
 }
 
 // copy makes a copy of input in a gradient-preserving way

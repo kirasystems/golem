@@ -1,7 +1,7 @@
 package pkg
 
 import (
-	rand2 "math/rand"
+	mathrand "math/rand"
 
 	mat "github.com/nlpodyssey/spago/pkg/mat32"
 
@@ -29,14 +29,56 @@ type TrainingParameters struct {
 	CategoricalColumns []string
 }
 
-type lossFunc func(g *ag.Graph, prediction ag.Node, target mat.Float) ag.Node
+type lossFunc func(g *ag.Graph, prediction ag.Node, target interface{}) ag.Node
 
-func crossEntropyLoss(g *ag.Graph, prediction ag.Node, target mat.Float) ag.Node {
-	return losses.CrossEntropy(g, prediction, int(target))
+func crossEntropyLoss(g *ag.Graph, prediction ag.Node, target interface{}) ag.Node {
+	return losses.CrossEntropy(g, prediction, int(target.(mat.Float)))
 }
 
-func mseLoss(g *ag.Graph, prediction ag.Node, target mat.Float) ag.Node {
-	return losses.MSE(g, prediction, g.NewScalar(target), false)
+func mseLoss(g *ag.Graph, prediction ag.Node, target interface{}) ag.Node {
+	return losses.MSE(g, prediction, g.NewScalar(target.(mat.Float)), false)
+}
+
+type dataPreProcessor interface {
+	process(g *ag.Graph, input []ag.Node) []ag.Node
+}
+
+type inputDropoutPreprocessor struct {
+	P              mat.Float
+	Rand           *rand.LockedRand
+	CurrentMasks   []mat.Matrix
+	InputDimension int
+}
+
+func NewDropoutPreprocessor(p mat.Float, r *rand.LockedRand, inputDimension, batchSize int) *inputDropoutPreprocessor {
+	dropout := &inputDropoutPreprocessor{
+		P:              p,
+		Rand:           r,
+		CurrentMasks:   make([]mat.Matrix, batchSize),
+		InputDimension: inputDimension,
+	}
+	for i := range dropout.CurrentMasks {
+		dropout.CurrentMasks[i] = mat.NewEmptyVecDense(inputDimension)
+	}
+	return dropout
+}
+
+func (d *inputDropoutPreprocessor) process(g *ag.Graph, input []ag.Node) []ag.Node {
+	result := make([]ag.Node, len(input))
+	for i := range input {
+		for j := 0; j < d.InputDimension; j++ {
+			r := d.Rand.Float()
+			if r <= d.P {
+				r = 1.0
+			} else {
+				r = 0.0
+			}
+			d.CurrentMasks[i].Set(0, j, r)
+		}
+		result[i] = g.Prod(input[i], g.NewVariable(d.CurrentMasks[i], false))
+	}
+	return result
+
 }
 
 func lossFor(metadata *model.Metadata) lossFunc {
@@ -52,10 +94,11 @@ func lossFor(metadata *model.Metadata) lossFunc {
 }
 
 type Trainer struct {
-	params    TrainingParameters
-	optimizer *gd.GradientDescent
-	model     *model.TabNet
-	lossFunc  lossFunc
+	params       TrainingParameters
+	optimizer    *gd.GradientDescent
+	model        *model.TabNet
+	lossFunc     lossFunc
+	preProcessor dataPreProcessor
 }
 
 func Train(trainFile, outputFileName, targetColumn string, config model.TabNetConfig, trainingParams TrainingParameters) {
@@ -78,7 +121,7 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 		log.Fatal().Msgf("No data to train")
 		return
 	}
-	dataSet.Rand = rand2.New(rand2.NewSource(int64(trainingParams.RndSeed)))
+	dataSet.Rand = mathrand.New(mathrand.NewSource(int64(trainingParams.RndSeed)))
 
 	//Overwrite values that are  only known after parsing the dataset
 	config.NumColumns = metaData.FeatureCount()
@@ -152,6 +195,9 @@ func (t *Trainer) trainBatch(batch io.DataBatch) (mat.Float, mat.Float, mat.Floa
 	defer g.Clear()
 
 	input := createInputNodes(batch, g, t.model)
+	if t.preProcessor != nil {
+		input = t.preProcessor.process(g, input)
+	}
 	ctx := nn.Context{Graph: g, Mode: nn.Training}
 	modelProc := nn.Reify(ctx, t.model).(*model.TabNet)
 	prediction := modelProc.Forward(input)
