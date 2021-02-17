@@ -98,10 +98,7 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, *Dat
 	currentLine := 0
 
 	for record, err = reader.Read(); err == nil; record, err = reader.Read() {
-		//TODO: add support for continuous targets
-
 		dataRecord := DataRecord{}
-
 		targetValue, err := parseTarget(newMetadata, metaData, record[metaData.TargetColumn])
 		if err != nil {
 			errors = append(errors, DataError{
