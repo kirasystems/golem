@@ -27,6 +27,7 @@ type TrainingParameters struct {
 	ReportInterval     int
 	RndSeed            uint64
 	CategoricalColumns []string
+	InputDropout       mat.Float
 }
 
 type lossFunc func(g *ag.Graph, prediction ag.Node, target interface{}) ag.Node
@@ -39,18 +40,27 @@ func mseLoss(g *ag.Graph, prediction ag.Node, target interface{}) ag.Node {
 	return losses.MSE(g, prediction, g.NewScalar(target.(mat.Float)), false)
 }
 
+func reconstructionLoss(g *ag.Graph, prediction ag.Node, target interface{}) ag.Node {
+	reconstructed := target.(ag.Node)
+	return losses.MSE(g, prediction, reconstructed, false)
+}
+
 type dataPreProcessor interface {
 	process(g *ag.Graph, input []ag.Node) []ag.Node
 }
 
 type inputDropoutPreprocessor struct {
 	P              mat.Float
-	Rand           *rand.LockedRand
+	Rand           dropoutRand
 	CurrentMasks   []mat.Matrix
 	InputDimension int
 }
 
-func NewDropoutPreprocessor(p mat.Float, r *rand.LockedRand, inputDimension, batchSize int) *inputDropoutPreprocessor {
+type dropoutRand interface {
+	Float() float32
+}
+
+func NewDropoutPreprocessor(p mat.Float, r dropoutRand, inputDimension, batchSize int) *inputDropoutPreprocessor {
 	dropout := &inputDropoutPreprocessor{
 		P:              p,
 		Rand:           r,
@@ -73,15 +83,17 @@ func (d *inputDropoutPreprocessor) process(g *ag.Graph, input []ag.Node) []ag.No
 			} else {
 				r = 0.0
 			}
-			d.CurrentMasks[i].Set(0, j, r)
+			d.CurrentMasks[i].Set(j, 0, r)
 		}
 		result[i] = g.Prod(input[i], g.NewVariable(d.CurrentMasks[i], false))
 	}
 	return result
-
 }
 
 func lossFor(metadata *model.Metadata) lossFunc {
+	if metadata.TargetColumn == -1 {
+		return reconstructionLoss
+	}
 	switch metadata.TargetType() {
 	case model.Continuous:
 		return mseLoss
@@ -135,6 +147,11 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 
 	t.model = model.NewTabNet(config)
 	t.lossFunc = lossFor(metaData)
+
+	if trainingParams.InputDropout > 0 {
+		t.preProcessor = NewDropoutPreprocessor(trainingParams.InputDropout, rndGen, config.NumColumns, trainingParams.BatchSize)
+	}
+
 	t.model.Init(rndGen)
 
 	updaterConfig := adam.NewDefaultConfig() // TODO: `radam` may provide better results
@@ -200,14 +217,14 @@ func (t *Trainer) trainBatch(batch io.DataBatch) (mat.Float, mat.Float, mat.Floa
 	}
 	ctx := nn.Context{Graph: g, Mode: nn.Training}
 	modelProc := nn.Reify(ctx, t.model).(*model.TabNet)
-	prediction := modelProc.Forward(input)
+	output := modelProc.Forward(input)
 
 	var batchLoss, batchTargetLoss, batchSparsityLoss ag.Node
 	for i := range batch {
-		targetLoss := t.lossFunc(g, prediction[i], batch[i].Target)
+		targetLoss := t.lossFunc(g, output.Output[i], batch[i].Target)
 		batchTargetLoss = g.Add(batchTargetLoss, targetLoss)
-		batchSparsityLoss = g.Add(batchSparsityLoss, modelProc.AttentionEntropy[i])
-		exampleAttentionEntropy := g.Mul(modelProc.AttentionEntropy[i], g.Constant(mat.Float(t.model.SparsityLossWeight)))
+		batchSparsityLoss = g.Add(batchSparsityLoss, output.AttentionEntropy[i])
+		exampleAttentionEntropy := g.Mul(output.AttentionEntropy[i], g.Constant(mat.Float(t.model.SparsityLossWeight)))
 		exampleLoss := g.Add(targetLoss, exampleAttentionEntropy)
 		batchLoss = g.Add(batchLoss, exampleLoss)
 	}

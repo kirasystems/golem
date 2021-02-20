@@ -31,10 +31,6 @@ type TabNet struct {
 	Decoders                     []*decoder.Model
 	OutputLayer                  *linear.Model
 	CategoricalFeatureEmbeddings []nn.Param `spago:"type:weights"`
-	AttentionEntropy             []ag.Node  `spago:"scope:processor"`
-
-	// AttentionMasks holds, after Forward, the feature attention masks.
-	AttentionMasks []AttentionMask `spago:"scope:processor"`
 }
 
 const Epsilon = 0.00001
@@ -80,10 +76,7 @@ func createDecoders(config TabNetConfig) []*decoder.Model {
 }
 
 func createOutputLayer(config TabNetConfig) *linear.Model {
-	if !config.UseDecoders {
-		return linear.New(config.IntermediateFeatureDimension, config.OutputDimension, linear.BiasGrad(false))
-	}
-	return nil
+	return linear.New(config.IntermediateFeatureDimension, config.OutputDimension, linear.BiasGrad(false))
 }
 
 func createBatchNormModels(config TabNetConfig) []*batchnorm.Model {
@@ -147,24 +140,38 @@ func NewAttentionMask(numSteps, numCols int) AttentionMask {
 	return mask
 }
 
-func (m *TabNet) Forward(xs []ag.Node) []ag.Node {
+type TabNetOutput struct {
+	Output           []ag.Node
+	DecoderOutput    []ag.Node
+	NormalizedInput  []ag.Node
+	AttentionMasks   []AttentionMask
+	AttentionEntropy []ag.Node
+}
+
+func (m *TabNet) Forward(xs []ag.Node) *TabNetOutput {
 	g := m.Graph()
 
+	output := TabNetOutput{}
+
 	if m.Mode() == nn.Inference {
-		if len(m.AttentionMasks) != len(xs) {
-			m.allocateAttentionMasks(len(xs))
-		}
+		output.AttentionMasks = m.allocateAttentionMasks(len(xs))
 	}
 
 	input := m.FeatureBatchNorm.Forward(xs...)
+	output.NormalizedInput = input
 
 	complementaryAggregatedMaskValues := make([]ag.Node, len(xs))
 	for i := range xs {
 		complementaryAggregatedMaskValues[i] = g.NewVariable(mat.NewInitVecDense(m.NumColumns, 1.0), true)
 	}
 
-	m.AttentionEntropy = make([]ag.Node, len(xs))
+	output.AttentionEntropy = make([]ag.Node, len(xs))
 	outputAggregated := make([]ag.Node, len(xs))
+
+	var decodedAggregated []ag.Node
+	if m.UseDecoders {
+		decodedAggregated = make([]ag.Node, len(xs))
+	}
 	maskedFeatures := m.copy(input)
 
 	for i := 0; i < m.NumDecisionSteps; i++ {
@@ -172,14 +179,13 @@ func (m *TabNet) Forward(xs []ag.Node) []ag.Node {
 		transformed = m.StepFeatureTransformers[i].Forward(0, transformed)
 
 		if i > 0 {
-			if !m.UseDecoders {
-				for k := range xs {
-					outputAggregated[k] = g.Add(outputAggregated[k], g.ReLU(transformed[k]))
-				}
-			} else {
+			for k := range xs {
+				outputAggregated[k] = g.Add(outputAggregated[k], g.ReLU(transformed[k]))
+			}
+			if m.UseDecoders {
 				decoded := m.Decoders[i].Forward(transformed)
 				for k := range xs {
-					outputAggregated[k] = g.Add(outputAggregated[k], decoded[k])
+					decodedAggregated[k] = g.Add(decodedAggregated[k], decoded[k])
 				}
 			}
 
@@ -194,21 +200,21 @@ func (m *TabNet) Forward(xs []ag.Node) []ag.Node {
 			mask[k] = g.Prod(mask[k], complementaryAggregatedMaskValues[k])
 			mask[k] = g.SparseMax(mask[k])
 			if m.Mode() == nn.Inference {
-				copy(m.AttentionMasks[k][i], mask[k].Value().Data())
+				copy(output.AttentionMasks[k][i], mask[k].Value().Data())
 			}
 			complementaryAggregatedMaskValues[k] = g.Prod(complementaryAggregatedMaskValues[k],
 				g.Neg(g.SubScalar(mask[k], g.Constant(mat.Float(m.RelaxationFactor)))))
 			maskedFeatures[k] = g.Prod(input[k], mask[k])
 			stepAttentionEntropy := g.ReduceSum(g.Prod(g.Neg(mask[k]), g.Log(g.AddScalar(mask[k], g.Constant(Epsilon)))))
 			stepAttentionEntropy = g.DivScalar(stepAttentionEntropy, g.Constant(mat.Float(float64(m.NumDecisionSteps-1))))
-			m.AttentionEntropy[k] = g.Add(m.AttentionEntropy[k], stepAttentionEntropy)
+			output.AttentionEntropy[k] = g.Add(output.AttentionEntropy[k], stepAttentionEntropy)
 		}
 	}
 
-	if m.OutputLayer != nil {
-		outputAggregated = m.OutputLayer.Forward(outputAggregated...)
-	}
-	return outputAggregated
+	output.Output = m.OutputLayer.Forward(outputAggregated...)
+	output.DecoderOutput = decodedAggregated
+
+	return &output
 
 }
 
@@ -221,9 +227,10 @@ func (m *TabNet) copy(xs []ag.Node) []ag.Node {
 	return ys
 }
 
-func (m *TabNet) allocateAttentionMasks(len int) {
-	m.AttentionMasks = make([]AttentionMask, len)
-	for i := range m.AttentionMasks {
-		m.AttentionMasks[i] = NewAttentionMask(m.NumDecisionSteps-1, m.NumColumns)
+func (m *TabNet) allocateAttentionMasks(len int) []AttentionMask {
+	result := make([]AttentionMask, len)
+	for i := range result {
+		result[i] = NewAttentionMask(m.NumDecisionSteps-1, m.NumColumns)
 	}
+	return result
 }

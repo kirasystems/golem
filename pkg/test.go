@@ -225,10 +225,10 @@ func testInternal(m *model.Model, dataSet *io.DataSet, outputFileName, attention
 	ctx := nn.Context{Graph: g, Mode: nn.Inference}
 	proc := nn.Reify(ctx, m.TabNet).(*model.TabNet)
 	for d := dataSet.Next(); len(d) > 0; d = dataSet.Next() {
-		predictions, attentionMasks := predict(g, proc, d)
-		for i, prediction := range predictions {
+		output := predict(g, proc, d)
+		for i, prediction := range output.Output {
 			evaluator.EvaluatePrediction(prediction, d[i])
-			attnWriter.writeStepAttentionMap(attentionMasks[i])
+			attnWriter.writeStepAttentionMap(output.AttentionMasks[i])
 		}
 		g.Clear()
 
@@ -312,10 +312,9 @@ func (r *regressionEvaluator) writeOutput(record *io.DataRecord, prediction mat.
 	fmt.Fprintf(r.outputWriter, "%f,%f\n", record.Target, prediction)
 }
 
-func predict(g *ag.Graph, m *model.TabNet, data io.DataBatch) ([]ag.Node, []model.AttentionMask) {
+func predict(g *ag.Graph, m *model.TabNet, data io.DataBatch) *model.TabNetOutput {
 	input := createInputNodes(data, g, m)
-	result := m.Forward(input)
-	return result, m.AttentionMasks
+	return m.Forward(input)
 }
 
 type attentionWriter struct {
