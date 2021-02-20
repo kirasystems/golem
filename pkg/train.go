@@ -30,19 +30,14 @@ type TrainingParameters struct {
 	InputDropout       mat.Float
 }
 
-type lossFunc func(g *ag.Graph, prediction ag.Node, target interface{}) ag.Node
+type lossFunc func(g *ag.Graph, prediction ag.Node, target mat.Float) ag.Node
 
-func crossEntropyLoss(g *ag.Graph, prediction ag.Node, target interface{}) ag.Node {
-	return losses.CrossEntropy(g, prediction, int(target.(mat.Float)))
+func crossEntropyLoss(g *ag.Graph, prediction ag.Node, target mat.Float) ag.Node {
+	return losses.CrossEntropy(g, prediction, int(target))
 }
 
-func mseLoss(g *ag.Graph, prediction ag.Node, target interface{}) ag.Node {
-	return losses.MSE(g, prediction, g.NewScalar(target.(mat.Float)), false)
-}
-
-func reconstructionLoss(g *ag.Graph, prediction ag.Node, target interface{}) ag.Node {
-	reconstructed := target.(ag.Node)
-	return losses.MSE(g, prediction, reconstructed, false)
+func mseLoss(g *ag.Graph, prediction ag.Node, target mat.Float) ag.Node {
+	return losses.MSE(g, prediction, g.NewScalar(target), false)
 }
 
 type dataPreProcessor interface {
@@ -91,9 +86,7 @@ func (d *inputDropoutPreprocessor) process(g *ag.Graph, input []ag.Node) []ag.No
 }
 
 func lossFor(metadata *model.Metadata) lossFunc {
-	if metadata.TargetColumn == -1 {
-		return reconstructionLoss
-	}
+
 	switch metadata.TargetType() {
 	case model.Continuous:
 		return mseLoss
