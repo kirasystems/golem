@@ -314,7 +314,8 @@ func (r *regressionEvaluator) writeOutput(record *io.DataRecord, prediction mat.
 
 func predict(g *ag.Graph, m *model.TabNet, data io.DataBatch) *model.TabNetOutput {
 	input := createInputNodes(data, g, m)
-	return m.Forward(input)
+
+	return m.Forward(m.FeatureBatchNorm.Forward(input...))
 }
 
 type attentionWriter struct {

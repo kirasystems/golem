@@ -27,7 +27,7 @@ type TrainingParameters struct {
 	ReportInterval     int
 	RndSeed            uint64
 	CategoricalColumns []string
-	InputDropout       mat.Float
+	InputDropout       float64
 }
 
 type lossFunc func(g *ag.Graph, prediction ag.Node, target mat.Float) ag.Node
@@ -142,7 +142,7 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 	t.lossFunc = lossFor(metaData)
 
 	if trainingParams.InputDropout > 0 {
-		t.preProcessor = NewDropoutPreprocessor(trainingParams.InputDropout, rndGen, config.NumColumns, trainingParams.BatchSize)
+		t.preProcessor = NewDropoutPreprocessor(mat.Float(1.0-trainingParams.InputDropout), rndGen, config.NumColumns, trainingParams.BatchSize)
 	}
 
 	t.model.Init(rndGen)
@@ -160,13 +160,14 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 		t.optimizer.IncEpoch()
 		i := 0
 		for batch := dataSet.Next(); len(batch) > 0; batch = dataSet.Next() {
-			totalLoss, targetLoss, sparsityLoss := t.trainBatch(batch)
+			out := t.trainBatch(batch)
 			t.optimizer.Optimize()
 			if i%t.params.ReportInterval == 0 {
 				log.Info().Int("epoch", epoch).Int("batch", i).
-					Float32("totalLoss", totalLoss).
-					Float32("targetLoss", targetLoss).
-					Float32("sparsityLoss", sparsityLoss).Msgf("")
+					Float32("totalLoss", out.TotalLoss).
+					Float32("targetLoss", out.TargetLoss).
+					Float32("sparsityLoss", out.SparsityLoss).
+					Float32("reconstructionLoss", out.ReconstructionLoss).Msgf("")
 			}
 			i++
 		}
@@ -196,7 +197,14 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 
 }
 
-func (t *Trainer) trainBatch(batch io.DataBatch) (mat.Float, mat.Float, mat.Float) {
+type trainBatchOutput struct {
+	TotalLoss          mat.Float
+	TargetLoss         mat.Float
+	SparsityLoss       mat.Float
+	ReconstructionLoss mat.Float
+}
+
+func (t *Trainer) trainBatch(batch io.DataBatch) trainBatchOutput {
 	t.optimizer.IncBatch()
 
 	g := ag.NewGraph(
@@ -205,20 +213,34 @@ func (t *Trainer) trainBatch(batch io.DataBatch) (mat.Float, mat.Float, mat.Floa
 	defer g.Clear()
 
 	input := createInputNodes(batch, g, t.model)
-	if t.preProcessor != nil {
-		input = t.preProcessor.process(g, input)
-	}
+
 	ctx := nn.Context{Graph: g, Mode: nn.Training}
 	modelProc := nn.Reify(ctx, t.model).(*model.TabNet)
-	output := modelProc.Forward(input)
 
-	var batchLoss, batchTargetLoss, batchSparsityLoss ag.Node
+	normalizedInput := modelProc.FeatureBatchNorm.Forward(input...)
+	var modelInput []ag.Node
+	if t.preProcessor != nil {
+		modelInput = t.preProcessor.process(g, normalizedInput)
+	} else {
+		modelInput = normalizedInput
+	}
+	output := modelProc.Forward(modelInput)
+
+	var batchLoss, batchTargetLoss, batchSparsityLoss, batchReconstructionLoss ag.Node
 	for i := range batch {
 		targetLoss := t.lossFunc(g, output.Output[i], batch[i].Target)
 		batchTargetLoss = g.Add(batchTargetLoss, targetLoss)
+
 		batchSparsityLoss = g.Add(batchSparsityLoss, output.AttentionEntropy[i])
-		exampleAttentionEntropy := g.Mul(output.AttentionEntropy[i], g.Constant(mat.Float(t.model.SparsityLossWeight)))
-		exampleLoss := g.Add(targetLoss, exampleAttentionEntropy)
+		weightedSparsityLoss := g.Mul(output.AttentionEntropy[i], g.Constant(mat.Float(t.model.SparsityLossWeight)))
+
+		reconstructionLoss := t.reconstructionLoss(g, normalizedInput[i], output.DecoderOutput[i])
+		batchReconstructionLoss = g.Add(batchReconstructionLoss, reconstructionLoss)
+		weigthedReconstructionLoss := g.Mul(reconstructionLoss, g.Constant(mat.Float(t.model.ReconstructionLossWeight)))
+
+		exampleLoss := g.Add(targetLoss, weightedSparsityLoss)
+		exampleLoss = g.Add(exampleLoss, weigthedReconstructionLoss)
+
 		batchLoss = g.Add(batchLoss, exampleLoss)
 	}
 	batchSize := g.NewScalar(mat.Float(len(batch)))
@@ -227,7 +249,17 @@ func (t *Trainer) trainBatch(batch io.DataBatch) (mat.Float, mat.Float, mat.Floa
 	batchSparsityLoss = g.Div(batchSparsityLoss, batchSize)
 
 	g.Backward(batchLoss)
-	return batchLoss.ScalarValue(), batchTargetLoss.ScalarValue(), batchSparsityLoss.ScalarValue()
+	return trainBatchOutput{
+		TotalLoss:          batchLoss.ScalarValue(),
+		TargetLoss:         batchTargetLoss.ScalarValue(),
+		SparsityLoss:       batchSparsityLoss.ScalarValue(),
+		ReconstructionLoss: batchReconstructionLoss.ScalarValue(),
+	}
+}
+
+func (t *Trainer) reconstructionLoss(g *ag.Graph, input ag.Node, output ag.Node) ag.Node {
+	detachedInput := g.NewVariable(g.GetCopiedValue(input), false)
+	return losses.MSE(g, output, detachedInput, true)
 }
 
 func createInputNodes(batch io.DataBatch, g *ag.Graph, model *model.TabNet) []ag.Node {

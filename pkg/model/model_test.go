@@ -15,22 +15,16 @@ const testBatchSize = 20
 func TestTabNet_Forward_Decoder(t *testing.T) {
 
 	tests := []struct {
-		numColumns              int
-		outputDimension         int
-		useDecoders             bool
-		expectedOutputDimension int
+		numColumns      int
+		outputDimension int
 	}{
 		{
-			numColumns:              19,
-			outputDimension:         1,
-			useDecoders:             true,
-			expectedOutputDimension: 19,
+			numColumns:      19,
+			outputDimension: 1,
 		},
 		{
-			numColumns:              20,
-			outputDimension:         2,
-			useDecoders:             false,
-			expectedOutputDimension: 2,
+			numColumns:      20,
+			outputDimension: 2,
 		},
 	}
 
@@ -46,7 +40,6 @@ func TestTabNet_Forward_Decoder(t *testing.T) {
 			BatchMomentum:                 0.9,
 			VirtualBatchSize:              16,
 			SparsityLossWeight:            0.001,
-			UseDecoders:                   tt.useDecoders,
 		})
 
 		g := ag.NewGraph(ag.Rand(rand.NewLockedRand(42)))
@@ -56,9 +49,10 @@ func TestTabNet_Forward_Decoder(t *testing.T) {
 
 		result := proc.Forward(input)
 		require.NotNil(t, result)
-		require.Equal(t, testBatchSize, len(result))
-		for _, r := range result {
-			require.Equal(t, tt.expectedOutputDimension, r.Value().Rows())
+		require.Equal(t, testBatchSize, len(result.Output))
+		for i, r := range result.Output {
+			require.Equal(t, tt.outputDimension, r.Value().Rows())
+			require.Equal(t, tt.numColumns, result.DecoderOutput[i].Value().Rows())
 		}
 	}
 

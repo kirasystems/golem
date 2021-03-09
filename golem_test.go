@@ -61,7 +61,7 @@ type logExpectation struct {
 func checkExpectation(log []logLine, expect logExpectation) error {
 	if expect.exactValue != nil {
 		if !hasExactValue(log, expect.key, expect.exactValue) {
-			return fmt.Errorf("key not found in log: %s, log is: \n %+v", expect.key, log)
+			return fmt.Errorf("key %s not found in log with value %+v, log is: \n %+v", expect.key, expect.exactValue, log)
 		}
 		return nil
 	}
@@ -100,18 +100,18 @@ func TestGolem(t *testing.T) {
 		},
 		{
 			Name:                "Breast Cancer",
-			TrainCmdLine:        "train -i datasets/breast_cancer/breast-cancer.train -o $MODEL -t Class --categorical-columns Class,Age,Menopause,Tumor-size,Inv-nodes,Node-caps,Breast,Breast-quad,Irradiat  -s 6 -n 50",
+			TrainCmdLine:        "train -i datasets/breast_cancer/breast-cancer.train -o $MODEL -t Class --categorical-columns Class,Age,Menopause,Tumor-size,Inv-nodes,Node-caps,Breast,Breast-quad,Irradiat  -s 6 -n 40",
 			TestCmdLine:         "test -i datasets/breast_cancer/breast-cancer.test -m $MODEL ",
-			ExpectedTrainOutput: []logExpectation{{key: "epoch", exactValue: 49.0}},
+			ExpectedTrainOutput: []logExpectation{{key: "epoch", exactValue: 39.0}},
 			ExpectedTestOutput:  []logExpectation{{key: "MacroF1", minValue: 0.7, maxValue: 1}},
 		},
 
 		{
 			Name:                "Boston Housing",
-			TrainCmdLine:        "train -i datasets/boston_housing/boston-housing-train.csv -o $MODEL -t medv  -n 20 -s 4 --sparsity-loss-weight 0.01",
+			TrainCmdLine:        "train -i datasets/boston_housing/boston-housing-train.csv -o $MODEL -t medv  -n 20 -s 3 --sparsity-loss-weight 0.01",
 			TestCmdLine:         "test -i datasets/boston_housing/boston-housing-test.csv -m $MODEL ",
 			ExpectedTrainOutput: []logExpectation{{key: "epoch", exactValue: 19.0}},
-			ExpectedTestOutput:  []logExpectation{{key: "R-squared", minValue: 0.7, maxValue: 0.75}},
+			ExpectedTestOutput:  []logExpectation{{key: "R-squared", minValue: 0.6, maxValue: 0.75}},
 		},
 	}
 

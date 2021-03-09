@@ -46,7 +46,7 @@ type TabNetConfig struct {
 	BatchMomentum                 float64
 	VirtualBatchSize              int
 	SparsityLossWeight            float64
-	UseDecoders                   bool
+	ReconstructionLossWeight      float64
 }
 
 func NewTabNet(config TabNetConfig) *TabNet {
@@ -64,9 +64,6 @@ func NewTabNet(config TabNetConfig) *TabNet {
 }
 
 func createDecoders(config TabNetConfig) []*decoder.Model {
-	if !config.UseDecoders {
-		return nil
-	}
 	decoders := make([]*decoder.Model, config.NumDecisionSteps)
 	for i := range decoders {
 		decoders[i] = decoder.NewDecoder(config.IntermediateFeatureDimension, config.IntermediateFeatureDimension, config.NumColumns, config.BatchMomentum)
@@ -121,12 +118,17 @@ func (m *TabNet) Init(generator *rand.LockedRand) {
 	for _, transformer := range m.AttentionTransformer {
 		initializers.XavierUniform(transformer.W.Value(), gain, generator)
 	}
+
 	initializers.XavierUniform(m.OutputLayer.W.Value(), gain, generator)
 
 	for _, p := range m.CategoricalFeatureEmbeddings {
 		initializers.Uniform(p.Value(), -0.1, 0.1, generator)
-
 	}
+
+	for _, decoder := range m.Decoders {
+		decoder.Init(generator)
+	}
+
 }
 
 type StepAttentionMask []mat.Float
@@ -143,35 +145,28 @@ func NewAttentionMask(numSteps, numCols int) AttentionMask {
 type TabNetOutput struct {
 	Output           []ag.Node
 	DecoderOutput    []ag.Node
-	NormalizedInput  []ag.Node
 	AttentionMasks   []AttentionMask
 	AttentionEntropy []ag.Node
 }
 
-func (m *TabNet) Forward(xs []ag.Node) *TabNetOutput {
+func (m *TabNet) Forward(input []ag.Node) *TabNetOutput {
 	g := m.Graph()
 
 	output := TabNetOutput{}
 
 	if m.Mode() == nn.Inference {
-		output.AttentionMasks = m.allocateAttentionMasks(len(xs))
+		output.AttentionMasks = m.allocateAttentionMasks(len(input))
 	}
 
-	input := m.FeatureBatchNorm.Forward(xs...)
-	output.NormalizedInput = input
-
-	complementaryAggregatedMaskValues := make([]ag.Node, len(xs))
-	for i := range xs {
+	complementaryAggregatedMaskValues := make([]ag.Node, len(input))
+	for i := range input {
 		complementaryAggregatedMaskValues[i] = g.NewVariable(mat.NewInitVecDense(m.NumColumns, 1.0), true)
 	}
 
-	output.AttentionEntropy = make([]ag.Node, len(xs))
-	outputAggregated := make([]ag.Node, len(xs))
+	output.AttentionEntropy = make([]ag.Node, len(input))
+	outputAggregated := make([]ag.Node, len(input))
+	decodedAggregated := make([]ag.Node, len(input))
 
-	var decodedAggregated []ag.Node
-	if m.UseDecoders {
-		decodedAggregated = make([]ag.Node, len(xs))
-	}
 	maskedFeatures := m.copy(input)
 
 	for i := 0; i < m.NumDecisionSteps; i++ {
@@ -179,14 +174,13 @@ func (m *TabNet) Forward(xs []ag.Node) *TabNetOutput {
 		transformed = m.StepFeatureTransformers[i].Forward(0, transformed)
 
 		if i > 0 {
-			for k := range xs {
+			for k := range input {
 				outputAggregated[k] = g.Add(outputAggregated[k], g.ReLU(transformed[k]))
 			}
-			if m.UseDecoders {
-				decoded := m.Decoders[i].Forward(transformed)
-				for k := range xs {
-					decodedAggregated[k] = g.Add(decodedAggregated[k], decoded[k])
-				}
+
+			decoded := m.Decoders[i].Forward(transformed)
+			for k := range input {
+				decodedAggregated[k] = g.Add(decodedAggregated[k], decoded[k])
 			}
 
 		}

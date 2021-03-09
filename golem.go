@@ -40,6 +40,7 @@ func TrainCommand() *cobra.Command {
 	cmd.Flags().IntVarP(&trainingParameters.NumEpochs, "num-epochs", "n", 10, "number of epochs to train")
 	cmd.Flags().Uint64VarP(&trainingParameters.RndSeed, "random-seed", "x", 42, "random seed")
 	cmd.Flags().StringSliceVarP(&trainingParameters.CategoricalColumns, "categorical-columns", "", nil, "list of columns holding categorical data")
+	cmd.Flags().Float64VarP(&trainingParameters.InputDropout, "input-dropout-probability", "", 0.1, "probability of input dropout")
 
 	cmd.Flags().IntVarP(&modelParameters.CategoricalEmbeddingDimension, "categorical-embedding-size", "c", 1, "size of categorical embeddings")
 	cmd.Flags().IntVarP(&modelParameters.NumDecisionSteps, "num-decision-steps", "s", 2, "number of decision steps")
@@ -48,6 +49,7 @@ func TrainCommand() *cobra.Command {
 	cmd.Flags().Float64VarP(&modelParameters.RelaxationFactor, "relaxation-factor", "g", 1.5, "relaxation factor")
 	cmd.Flags().Float64VarP(&modelParameters.BatchMomentum, "batch-momentum", "", 0.9, "batch momentum")
 	cmd.Flags().Float64VarP(&modelParameters.SparsityLossWeight, "sparsity-loss-weight", "", 0.0001, "weight of the sparsity loss in total loss")
+	cmd.Flags().Float64VarP(&modelParameters.ReconstructionLossWeight, "reconstruction-loss-weight", "", 0.0001, "weight of the reconstruction loss in total loss")
 
 	cmd.Flags().StringVarP(&targetColumn, "target-column", "t", "", "target column")
 

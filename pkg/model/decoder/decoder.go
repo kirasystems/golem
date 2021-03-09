@@ -10,7 +10,7 @@ import (
 	"golem/pkg/model/featuretransformer"
 )
 
-// Model implements a TabNet decoder for a single decision step
+// Model implements a TabNet decoder
 type Model struct {
 	nn.BaseModel
 
