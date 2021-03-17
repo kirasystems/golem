@@ -1,0 +1,9 @@
+done: switch logging to zerolog
+done: shuffle data at each epoch
+done convert to spago 0.4 (float32)
+done output attention map
+- automatic train to convergence
+- automatic cross-validation
+- download openml datasets
+- grow in depth dynamically?
+- cluster dataset based on attention map?

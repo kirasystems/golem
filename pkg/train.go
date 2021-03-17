@@ -229,6 +229,7 @@ func (t *Trainer) trainBatch(batch io.DataBatch) trainBatchOutput {
 	var batchLoss, batchTargetLoss, batchSparsityLoss, batchReconstructionLoss ag.Node
 	for i := range batch {
 		targetLoss := t.lossFunc(g, output.Output[i], batch[i].Target)
+		weightedTargetLoss := g.Mul(targetLoss, g.Constant(mat.Float(t.model.TargetLossWeight)))
 		batchTargetLoss = g.Add(batchTargetLoss, targetLoss)
 
 		batchSparsityLoss = g.Add(batchSparsityLoss, output.AttentionEntropy[i])
@@ -236,10 +237,10 @@ func (t *Trainer) trainBatch(batch io.DataBatch) trainBatchOutput {
 
 		reconstructionLoss := t.reconstructionLoss(g, normalizedInput[i], output.DecoderOutput[i])
 		batchReconstructionLoss = g.Add(batchReconstructionLoss, reconstructionLoss)
-		weigthedReconstructionLoss := g.Mul(reconstructionLoss, g.Constant(mat.Float(t.model.ReconstructionLossWeight)))
+		weightedReconstructionLoss := g.Mul(reconstructionLoss, g.Constant(mat.Float(t.model.ReconstructionLossWeight)))
 
-		exampleLoss := g.Add(targetLoss, weightedSparsityLoss)
-		exampleLoss = g.Add(exampleLoss, weigthedReconstructionLoss)
+		exampleLoss := g.Add(weightedTargetLoss, weightedSparsityLoss)
+		exampleLoss = g.Add(exampleLoss, weightedReconstructionLoss)
 
 		batchLoss = g.Add(batchLoss, exampleLoss)
 	}

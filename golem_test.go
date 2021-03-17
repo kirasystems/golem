@@ -103,7 +103,7 @@ func TestGolem(t *testing.T) {
 			TrainCmdLine:        "train -i datasets/breast_cancer/breast-cancer.train -o $MODEL -t Class --categorical-columns Class,Age,Menopause,Tumor-size,Inv-nodes,Node-caps,Breast,Breast-quad,Irradiat  -s 6 -n 40",
 			TestCmdLine:         "test -i datasets/breast_cancer/breast-cancer.test -m $MODEL ",
 			ExpectedTrainOutput: []logExpectation{{key: "epoch", exactValue: 39.0}},
-			ExpectedTestOutput:  []logExpectation{{key: "MacroF1", minValue: 0.7, maxValue: 1}},
+			ExpectedTestOutput:  []logExpectation{{key: "MacroF1", minValue: 0.65, maxValue: 0.75}},
 		},
 
 		{

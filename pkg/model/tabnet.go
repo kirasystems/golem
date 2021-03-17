@@ -47,6 +47,7 @@ type TabNetConfig struct {
 	VirtualBatchSize              int
 	SparsityLossWeight            float64
 	ReconstructionLossWeight      float64
+	TargetLossWeight              float64
 }
 
 func NewTabNet(config TabNetConfig) *TabNet {
