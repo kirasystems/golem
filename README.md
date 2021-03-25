@@ -6,7 +6,9 @@ Some things set Golam apart from other TabNet implementations:
 
 - It is written in Go, using the amazing [Spago](https://github.com/nlpodyssey/spago) module 
 - More than just the core model, it provides a tool that can be used end-to-end, supporting the pervasive CSV file format out of the box.
-
+- It implements simultaneously both the sparsity and input reconstruction objectives described in the original paper. Input reconstruction
+loss can be useful for out-of-distribution detection. 
+  
 This is a work in progress that started as a platform for the exploration of the 
 common territory between Software Engineering and Machine Learning. 
 
