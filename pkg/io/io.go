@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strconv"
 
@@ -96,6 +97,7 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, *Dat
 
 	var data []*DataRecord
 	currentLine := 0
+	targetType := metaData.Columns[metaData.TargetColumn].Type
 
 	for record, err = reader.Read(); err == nil; record, err = reader.Read() {
 		dataRecord := DataRecord{}
@@ -109,9 +111,13 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, *Dat
 		}
 
 		dataRecord.Target = targetValue
-		dataRecord.ContinuousFeatures = mat.NewEmptyVecDense(metaData.ContinuousFeaturesMap.Size())
 
-		err = parseContinuousFeatures(metaData, record, dataRecord.ContinuousFeatures)
+		if targetType == model.Continuous && newMetadata {
+			metaData.Columns[metaData.TargetColumn].Average += float64(targetValue)
+		}
+
+		dataRecord.ContinuousFeatures = mat.NewEmptyVecDense(metaData.ContinuousFeaturesMap.Size())
+		err = parseContinuousFeatures(metaData, record, dataRecord.ContinuousFeatures, newMetadata)
 		if err != nil {
 			errors = append(errors, DataError{
 				Line:  currentLine,
@@ -134,11 +140,72 @@ func LoadData(p DataParameters, metaData *model.Metadata) (*model.Metadata, *Dat
 
 	dataSet := NewDataSet(data, p.BatchSize)
 
+	if newMetadata {
+		computeStatistics(metaData, dataSet)
+	}
+	standardizeContinuousFeatures(metaData, dataSet)
+	if targetType == model.Continuous {
+		standardizeTarget(metaData, dataSet)
+	}
+
 	return metaData, dataSet, errors, nil
 }
 
-func parseColumns(record []string, p DataParameters) []model.Column {
-	result := make([]model.Column, len(record))
+func standardizeTarget(metadata *model.Metadata, set *DataSet) {
+	set.ResetOrder(OriginalOrder)
+	for batch := set.Next(); len(batch) > 0; batch = set.Next() {
+		for _, d := range batch {
+			targetColumn := metadata.Columns[metadata.TargetColumn]
+			d.Target = mat.Float((float64(d.Target) - targetColumn.Average) / targetColumn.StdDev)
+		}
+	}
+}
+
+func standardizeContinuousFeatures(metadata *model.Metadata, set *DataSet) {
+	set.ResetOrder(OriginalOrder)
+	for batch := set.Next(); len(batch) > 0; batch = set.Next() {
+		for _, d := range batch {
+			for column, index := range metadata.ContinuousFeaturesMap.ColumnToIndex {
+				val := float64(d.ContinuousFeatures.At(index, 0))
+				col := metadata.Columns[column]
+				val = (val - col.Average) / col.StdDev
+				d.ContinuousFeatures.Set(index, 0, mat.Float(val))
+			}
+		}
+	}
+}
+
+// computeStatistics computes dataset-wide statistics
+// (currently only mean and std deviation of each continuous feature and continuous target)
+func computeStatistics(metadata *model.Metadata, set *DataSet) {
+	set.ResetOrder(OriginalOrder)
+	stdDevs := make([]float64, len(metadata.Columns))
+	targetStdDev := 0.0
+	dataCount := float64(set.Size())
+	targetColumn := metadata.Columns[metadata.TargetColumn]
+
+	for _, col := range metadata.Columns {
+		col.Average = col.Average / dataCount
+	}
+
+	for batch := set.Next(); len(batch) > 0; batch = set.Next() {
+		for _, d := range batch {
+			for column, index := range metadata.ContinuousFeaturesMap.ColumnToIndex {
+				diff := math.Pow(float64(d.ContinuousFeatures.At(index, 0))-metadata.Columns[column].Average, 2)
+				stdDevs[column] += diff
+			}
+			targetStdDev += math.Pow(float64(d.Target)-targetColumn.Average, 2)
+		}
+	}
+	for i := range stdDevs {
+		metadata.Columns[i].StdDev = math.Sqrt(stdDevs[i] / dataCount)
+	}
+	targetColumn.StdDev = math.Sqrt(targetStdDev / dataCount)
+
+}
+
+func parseColumns(record []string, p DataParameters) []*model.Column {
+	result := make([]*model.Column, len(record))
 
 	columnType := func(c string) model.ColumnType {
 		if _, ok := p.CategoricalColumns[c]; ok {
@@ -147,7 +214,7 @@ func parseColumns(record []string, p DataParameters) []model.Column {
 		return model.Continuous
 	}
 	for i := range result {
-		result[i] = model.Column{
+		result[i] = &model.Column{
 			Name: record[i],
 			Type: columnType(record[i]),
 		}
@@ -158,8 +225,7 @@ func parseColumns(record []string, p DataParameters) []model.Column {
 
 func parseCategoricalFeatures(metaData *model.Metadata, newMetadata bool, record []string) ([]int, error) {
 	categoricalFeatures := make([]int, metaData.CategoricalFeaturesMap.Size())
-	for column := range metaData.CategoricalFeaturesMap.Columns() {
-		index := metaData.CategoricalFeaturesMap.ColumnToIndex[column]
+	for column, index := range metaData.CategoricalFeaturesMap.ColumnToIndex {
 		categoryValue := model.CategoricalValue{
 			Column: column,
 			Value:  record[column],
@@ -179,13 +245,16 @@ func parseCategoricalFeatures(metaData *model.Metadata, newMetadata bool, record
 	return categoricalFeatures, nil
 }
 
-func parseContinuousFeatures(metaData *model.Metadata, record []string, features mat.Matrix) error {
+func parseContinuousFeatures(metaData *model.Metadata, record []string, features mat.Matrix, newMetadata bool) error {
 	for column, index := range metaData.ContinuousFeaturesMap.ColumnToIndex {
 		value, err := strconv.ParseFloat(record[column], 64)
 		if err != nil {
 			return fmt.Errorf("error parsing feature %s: %w", metaData.Columns[column].Name, err)
 		}
 		features.Set(index, 0, mat.Float(value))
+		if newMetadata {
+			metaData.Columns[column].Average += value
+		}
 	}
 	return nil
 }

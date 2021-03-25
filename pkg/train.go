@@ -217,7 +217,8 @@ func (t *Trainer) trainBatch(batch io.DataBatch) trainBatchOutput {
 	ctx := nn.Context{Graph: g, Mode: nn.Training}
 	modelProc := nn.Reify(ctx, t.model).(*model.TabNet)
 
-	normalizedInput := modelProc.FeatureBatchNorm.Forward(input...)
+	//normalizedInput := modelProc.FeatureBatchNorm.Forward(input...)
+	normalizedInput := input
 	var modelInput []ag.Node
 	if t.preProcessor != nil {
 		modelInput = t.preProcessor.process(g, normalizedInput)
@@ -235,7 +236,7 @@ func (t *Trainer) trainBatch(batch io.DataBatch) trainBatchOutput {
 		batchSparsityLoss = g.Add(batchSparsityLoss, output.AttentionEntropy[i])
 		weightedSparsityLoss := g.Mul(output.AttentionEntropy[i], g.Constant(mat.Float(t.model.SparsityLossWeight)))
 
-		reconstructionLoss := t.reconstructionLoss(g, normalizedInput[i], output.DecoderOutput[i])
+		reconstructionLoss := reconstructionLoss(g, normalizedInput[i], output.DecoderOutput[i])
 		batchReconstructionLoss = g.Add(batchReconstructionLoss, reconstructionLoss)
 		weightedReconstructionLoss := g.Mul(reconstructionLoss, g.Constant(mat.Float(t.model.ReconstructionLossWeight)))
 
@@ -248,8 +249,10 @@ func (t *Trainer) trainBatch(batch io.DataBatch) trainBatchOutput {
 	batchLoss = g.Div(batchLoss, batchSize)
 	batchTargetLoss = g.Div(batchTargetLoss, batchSize)
 	batchSparsityLoss = g.Div(batchSparsityLoss, batchSize)
+	batchReconstructionLoss = g.Div(batchReconstructionLoss, batchSize)
 
 	g.Backward(batchLoss)
+
 	return trainBatchOutput{
 		TotalLoss:          batchLoss.ScalarValue(),
 		TargetLoss:         batchTargetLoss.ScalarValue(),
@@ -258,9 +261,9 @@ func (t *Trainer) trainBatch(batch io.DataBatch) trainBatchOutput {
 	}
 }
 
-func (t *Trainer) reconstructionLoss(g *ag.Graph, input ag.Node, output ag.Node) ag.Node {
+func reconstructionLoss(g *ag.Graph, input ag.Node, output ag.Node) ag.Node {
 	detachedInput := g.NewVariable(g.GetCopiedValue(input), false)
-	return losses.MSE(g, output, detachedInput, true)
+	return losses.MSE(g, output, detachedInput, false)
 }
 
 func createInputNodes(batch io.DataBatch, g *ag.Graph, model *model.TabNet) []ag.Node {

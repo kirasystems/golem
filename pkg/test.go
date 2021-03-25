@@ -63,7 +63,8 @@ func Test(modelFileName, inputFileName, outputFileName string, attentionFileName
 }
 
 type modelEvaluator interface {
-	EvaluatePrediction(prediction ag.Node, record *io.DataRecord)
+	Columns() []string
+	EvaluatePrediction(prediction ag.Node, record *io.DataRecord) []string
 	LogMetrics()
 	Loss() float64
 }
@@ -75,8 +76,6 @@ type classificationEvaluator struct {
 	model           *model.Model
 	lossFunc        lossFunc
 	g               *ag.Graph
-	outputWriter    gio.Writer
-	wroteHeader     bool
 }
 type classificationPrediction struct {
 	predictedClass string
@@ -86,12 +85,15 @@ type classificationPrediction struct {
 	maxLogit       mat.Float
 }
 
-func (c *classificationEvaluator) EvaluatePrediction(node ag.Node, record *io.DataRecord) {
+func (c *classificationEvaluator) Columns() []string {
+	return []string{"label", "predicted", "probability"}
+}
+func (c *classificationEvaluator) EvaluatePrediction(node ag.Node, record *io.DataRecord) []string {
 	prediction := c.decode(node, record)
 	c.loss += float64(c.lossFunc(c.g, c.g.NewVariable(prediction.logits, false), prediction.labelValue).ScalarValue())
 	c.predictionCount++
 
-	c.writeOutput(prediction)
+	result := []string{prediction.label, prediction.predictedClass, fmt.Sprintf("%.5f", toProbability(prediction.maxLogit))}
 
 	labelClassMetrics, ok := c.metrics[prediction.label]
 	if !ok {
@@ -111,6 +113,7 @@ func (c *classificationEvaluator) EvaluatePrediction(node ag.Node, record *io.Da
 		predictedClassMetrics.IncFalsePos()
 	}
 
+	return result
 }
 
 func (c *classificationEvaluator) LogMetrics() {
@@ -152,16 +155,6 @@ func (c *classificationEvaluator) decode(modelOutput ag.Node, record *io.DataRec
 	}
 }
 
-func (c *classificationEvaluator) writeOutput(prediction classificationPrediction) {
-
-	if !c.wroteHeader {
-		fmt.Fprintf(c.outputWriter, "label,predicted,probability\n")
-		c.wroteHeader = true
-	}
-	fmt.Fprintf(c.outputWriter, "%s,%s,%.5f\n", prediction.label, prediction.predictedClass, toProbability(prediction.maxLogit))
-
-}
-
 func toProbability(logit mat.Float) float64 {
 	v := math.Exp(float64(logit))
 	return v / (1.0 + v)
@@ -201,40 +194,64 @@ func testInternal(m *model.Model, dataSet *io.DataSet, outputFileName, attention
 
 	lossFunc := lossFor(m.MetaData)
 
-	g := ag.NewGraph(ag.Rand(rand.NewLockedRand(42)))
+	g := ag.NewGraph(ag.Rand(rand.NewLockedRand(42)),
+		ag.ConcurrentComputations(1))
 
 	var evaluator modelEvaluator
 	switch m.MetaData.TargetType() {
 	case model.Categorical:
 		evaluator = &classificationEvaluator{
-			metrics:      map[string]*stats.ClassMetrics{},
-			model:        m,
-			lossFunc:     lossFunc,
-			g:            g,
-			outputWriter: predictionOutput,
+			metrics:  map[string]*stats.ClassMetrics{},
+			model:    m,
+			lossFunc: lossFunc,
+			g:        g,
 		}
 	default:
 		evaluator = &regressionEvaluator{
 			lossFunc:     lossFunc,
 			g:            g,
-			outputWriter: predictionOutput,
+			targetColumn: m.MetaData.Columns[m.MetaData.TargetColumn],
 		}
 	}
 
 	dataSet.ResetOrder(io.OriginalOrder)
 	ctx := nn.Context{Graph: g, Mode: nn.Inference}
 	proc := nn.Reify(ctx, m.TabNet).(*model.TabNet)
+	recLoss := 0.0
+	sparsityLoss := 0.0
+	numPredictions := 0
+
+	outputColumns := evaluator.Columns()
+	outputColumns = append(outputColumns, "reconstructionLoss")
+	for i := 0; i < len(outputColumns)-1; i++ {
+		fmt.Fprintf(predictionOutput, "%s,", outputColumns[i])
+	}
+	fmt.Fprintf(predictionOutput, "%s\n", outputColumns[len(outputColumns)-1])
+
 	for d := dataSet.Next(); len(d) > 0; d = dataSet.Next() {
-		output := predict(g, proc, d)
+		normalizedInput, output := predict(g, proc, d)
 		for i, prediction := range output.Output {
-			evaluator.EvaluatePrediction(prediction, d[i])
+			evalOutput := evaluator.EvaluatePrediction(prediction, d[i])
 			attnWriter.writeStepAttentionMap(output.AttentionMasks[i])
+			predReconstructionLoss := float64(reconstructionLoss(g, normalizedInput[i], output.DecoderOutput[i]).ScalarValue())
+
+			for _, v := range evalOutput {
+				fmt.Fprintf(predictionOutput, "%s,", v)
+			}
+			fmt.Fprintf(predictionOutput, "%f\n", predReconstructionLoss)
+
+			recLoss = recLoss + predReconstructionLoss
+			sparsityLoss = sparsityLoss + float64(output.AttentionEntropy[i].ScalarValue())
+			numPredictions++
 		}
 		g.Clear()
-
 	}
 	evaluator.LogMetrics()
-	log.Info().Float64("Loss", evaluator.Loss()).Msg("")
+	recLoss = recLoss / float64(numPredictions)
+	sparsityLoss = sparsityLoss / float64(numPredictions)
+	log.Info().Float64("Loss", evaluator.Loss()).
+		Float64("ReconstructionLoss", recLoss).
+		Float64("SparsityLoss", sparsityLoss).Msg("")
 
 	return nil
 }
@@ -273,18 +290,26 @@ type regressionEvaluator struct {
 	values          []mat.Float
 	lossFunc        lossFunc
 	g               *ag.Graph
-	outputWriter    gio.Writer
-	wroteHeader     bool
+	targetColumn    *model.Column
 }
 
-func (r *regressionEvaluator) EvaluatePrediction(prediction ag.Node, record *io.DataRecord) {
-	log.Debug().Float64("Target", float64(record.Target)).Float64("Prediction", float64(prediction.ScalarValue())).Msg("")
-	r.writeOutput(record, prediction.ScalarValue())
+func (r *regressionEvaluator) Columns() []string {
+	return []string{"label", "prediction"}
+}
+func (r *regressionEvaluator) originalTargetValue(v mat.Float) float64 {
+	return float64(v)*r.targetColumn.StdDev + r.targetColumn.Average
+
+}
+func (r *regressionEvaluator) EvaluatePrediction(prediction ag.Node, record *io.DataRecord) []string {
+
+	result := []string{fmt.Sprintf("%f", r.originalTargetValue(record.Target)), fmt.Sprintf("%f", r.originalTargetValue(prediction.ScalarValue()))}
 
 	r.estimated = append(r.estimated, prediction.ScalarValue())
 	r.values = append(r.values, record.Target)
 	r.loss += r.lossFunc(r.g, prediction, record.Target).ScalarValue()
 	r.predictionCount++
+
+	return result
 }
 
 func (r *regressionEvaluator) LogMetrics() {
@@ -304,18 +329,9 @@ func (r *regressionEvaluator) Loss() float64 {
 	return float64(r.loss) / float64(r.predictionCount)
 }
 
-func (r *regressionEvaluator) writeOutput(record *io.DataRecord, prediction mat.Float) {
-	if !r.wroteHeader {
-		fmt.Fprintf(r.outputWriter, "label,prediction\n")
-		r.wroteHeader = true
-	}
-	fmt.Fprintf(r.outputWriter, "%f,%f\n", record.Target, prediction)
-}
-
-func predict(g *ag.Graph, m *model.TabNet, data io.DataBatch) *model.TabNetOutput {
+func predict(g *ag.Graph, m *model.TabNet, data io.DataBatch) ([]ag.Node, *model.TabNetOutput) {
 	input := createInputNodes(data, g, m)
-
-	return m.Forward(m.FeatureBatchNorm.Forward(input...))
+	return input, m.Forward(input)
 }
 
 type attentionWriter struct {

@@ -22,7 +22,6 @@ var (
 type TabNet struct {
 	nn.BaseModel
 	TabNetConfig
-	FeatureBatchNorm *batchnorm.Model
 
 	SharedFeatureTransformer     *featuretransformer.Model
 	StepFeatureTransformers      []*featuretransformer.Model
@@ -53,7 +52,6 @@ type TabNetConfig struct {
 func NewTabNet(config TabNetConfig) *TabNet {
 	return &TabNet{
 		TabNetConfig:                 config,
-		FeatureBatchNorm:             batchnorm.NewWithMomentum(config.NumColumns, mat.Float(config.BatchMomentum)),
 		SharedFeatureTransformer:     featuretransformer.New(config.NumColumns, config.IntermediateFeatureDimension, config.NumDecisionSteps, config.BatchMomentum),
 		StepFeatureTransformers:      newStepFeatureTransformers(config),
 		AttentionTransformer:         createLinearTransformers(config),
@@ -210,7 +208,6 @@ func (m *TabNet) Forward(input []ag.Node) *TabNetOutput {
 	output.DecoderOutput = decodedAggregated
 
 	return &output
-
 }
 
 // copy makes a copy of input in a gradient-preserving way

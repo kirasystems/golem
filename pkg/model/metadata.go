@@ -117,10 +117,16 @@ const (
 type Column struct {
 	Name string
 	Type ColumnType
+
+	// Average value for this column (for continuous values only)
+	Average float64
+
+	// Standard deviation for this column (for continuous values only)
+	StdDev float64
 }
 
 type Metadata struct {
-	Columns []Column
+	Columns []*Column
 
 	// ContinuousFeaturesMap maps a data row column index to a dense matrix column index
 	ContinuousFeaturesMap *ColumnMap

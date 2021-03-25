@@ -1,11 +1,14 @@
 package io
 
 import (
+	"math"
 	"math/rand"
 	"testing"
 
 	mat "github.com/nlpodyssey/spago/pkg/mat32"
 	"github.com/stretchr/testify/require"
+
+	"golem/pkg/model"
 )
 
 func TestLoadData(t *testing.T) {
@@ -110,4 +113,120 @@ func extractOrder(split *DataSet) []mat.Float {
 		}
 	}
 	return order
+}
+
+func Test_Standardization(t *testing.T) {
+	params := DataParameters{
+		DataFile:           "../../datasets/iris/iris.train",
+		TargetColumn:       "species",
+		CategoricalColumns: NewSet("species"),
+		BatchSize:          10,
+	}
+	metaData, dataSet, dataErrors, err := LoadData(params, nil)
+	require.NoError(t, err)
+	require.Equal(t, 0, len(dataErrors))
+	require.NotZero(t, dataSet.Size())
+	require.NotNil(t, metaData)
+
+	require.InDelta(t, averageValue(dataSet, valueForColumn(t, metaData, "petal_length")), 0.0, 1e-6)
+	require.InDelta(t, averageValue(dataSet, valueForColumn(t, metaData, "sepal_length")), 0.0, 1e-6)
+	require.InDelta(t, averageValue(dataSet, valueForColumn(t, metaData, "petal_width")), 0.0, 1e-6)
+	require.InDelta(t, averageValue(dataSet, valueForColumn(t, metaData, "sepal_width")), 0.0, 1e-6)
+
+	require.InDelta(t, stdDev(dataSet, valueForColumn(t, metaData, "petal_length")), 1.0, 1e-6)
+	require.InDelta(t, stdDev(dataSet, valueForColumn(t, metaData, "sepal_length")), 1.0, 1e-6)
+	require.InDelta(t, stdDev(dataSet, valueForColumn(t, metaData, "petal_width")), 1.0, 1e-6)
+	require.InDelta(t, stdDev(dataSet, valueForColumn(t, metaData, "petal_width")), 1.0, 1e-6)
+
+	dataSet.ResetOrder(OriginalOrder)
+	for batch := dataSet.Next(); len(batch) > 0; batch = dataSet.Next() {
+		for _, d := range batch {
+			switch d.Target {
+			case 0.0, 1.0, 2.0:
+				continue
+			default:
+				t.Fatalf("invalid value found for target: %f", d.Target)
+
+			}
+
+		}
+	}
+}
+func Test_Standardization_Target(t *testing.T) {
+	params := DataParameters{
+		DataFile:           "../../datasets/cholesterol/cholesterol-train.csv",
+		TargetColumn:       "chol",
+		CategoricalColumns: NewSet("sex", "cp", "fbs", "restecg", "exang", "slope", "thal"),
+		BatchSize:          10,
+	}
+	metaData, dataSet, _, err := LoadData(params, nil)
+	_, dataSet, _, err = LoadData(params, metaData) // again, to make sure we can reload the dataset with previous metadata
+	require.NoError(t, err)
+	require.NotZero(t, dataSet.Size())
+	require.NotNil(t, metaData)
+
+	for i, col := range metaData.Columns {
+		switch col.Type {
+		case model.Continuous:
+			if i == metaData.TargetColumn {
+				v := func(d *DataRecord) float64 {
+					return float64(d.Target)
+				}
+				require.InDelta(t, averageValue(dataSet, v), 0, 1e-1)
+				require.InDelta(t, stdDev(dataSet, v), 1.0, 1e-1)
+
+				continue
+			}
+			require.InDelta(t, averageValue(dataSet, valueForColumn(t, metaData, col.Name)), 0, 0.2, "Col: %s", col.Name)
+			require.InDelta(t, stdDev(dataSet, valueForColumn(t, metaData, col.Name)), 1.0, 1e-1, "Col: %s", col.Name)
+
+		}
+	}
+
+}
+
+func stdDev(ds *DataSet, v valueFunc) float64 {
+	avg := averageValue(ds, v)
+	ds.ResetOrder(OriginalOrder)
+	stdDev := 0.0
+
+	for batch := ds.Next(); len(batch) > 0; batch = ds.Next() {
+		for _, d := range batch {
+			diff := v(d) - avg
+			stdDev += math.Pow(diff, 2)
+		}
+	}
+	stdDev = math.Sqrt(stdDev / (float64(ds.Size())))
+	return stdDev
+}
+
+type valueFunc func(d *DataRecord) float64
+
+func valueForColumn(t *testing.T, metaData *model.Metadata, name string) valueFunc {
+	return func(d *DataRecord) float64 {
+		col := -1
+		for i, n := range metaData.Columns {
+			if n.Name == name {
+				col = i
+				break
+			}
+		}
+		require.NotEqual(t, col, -1, "Cannot find column: %s", name)
+
+		index, ok := metaData.ContinuousFeaturesMap.ColumnToIndex[col]
+		require.True(t, ok, "Column %d is not continuous", col)
+		return float64(d.ContinuousFeatures.At(index, 0))
+
+	}
+}
+func averageValue(ds *DataSet, v valueFunc) float64 {
+	ds.ResetOrder(OriginalOrder)
+	avg := 0.0
+	for batch := ds.Next(); len(batch) > 0; batch = ds.Next() {
+		for _, d := range batch {
+			avg += v(d)
+		}
+	}
+	avg = avg / (float64(ds.Size()))
+	return avg
 }
