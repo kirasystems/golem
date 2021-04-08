@@ -106,7 +106,7 @@ type Trainer struct {
 	preProcessor dataPreProcessor
 }
 
-func Train(trainFile, outputFileName, targetColumn string, config model.TabNetConfig, trainingParams TrainingParameters) {
+func Train(trainFile, testFile, outputFileName, targetColumn string, config model.TabNetConfig, trainingParams TrainingParameters) {
 	t := &Trainer{params: trainingParams}
 
 	rndGen := rand.NewLockedRand(trainingParams.RndSeed)
@@ -180,19 +180,37 @@ func Train(trainFile, outputFileName, targetColumn string, config model.TabNetCo
 
 	outputFile, err := os.Create(outputFileName)
 	if err != nil {
-		log.Printf("Error creating output file %s: %s", outputFileName, err)
+		log.Fatal().Msgf("Error creating output file %s: %s", outputFileName, err)
 	}
 	defer outputFile.Close()
 
 	err = io.SaveModel(&m, outputFile)
 	if err != nil {
-		log.Printf("Error saving model to %s: %s", outputFileName, err)
+		log.Fatal().Msgf("Error saving model to %s: %s", outputFileName, err)
 	}
 
+	log.Info().Msgf("Train set metrics:")
 	err = testInternal(&m, dataSet, "", "")
 	if err != nil {
 		log.Fatal().Msg(err.Error())
+	}
 
+	if testFile != "" {
+		log.Info().Msgf("Test set metrics:")
+		_, testDataset, testDataErrors, err := io.LoadData(io.DataParameters{
+			DataFile:           testFile,
+			TargetColumn:       m.MetaData.Columns[m.MetaData.TargetColumn].Name,
+			CategoricalColumns: nil,
+			BatchSize:          1,
+		}, m.MetaData)
+		if err != nil {
+			log.Fatal().Msgf("error loading data from %s: %s", testFile, err)
+		}
+		printDataErrors(testDataErrors)
+		err = testInternal(&m, testDataset, "", "")
+		if err != nil {
+			log.Fatal().Msg(err.Error())
+		}
 	}
 
 }

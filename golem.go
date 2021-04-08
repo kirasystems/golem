@@ -17,6 +17,7 @@ import (
 func TrainCommand() *cobra.Command {
 
 	var trainFile string
+	var testFile string
 	var outputFile string
 	var targetColumn string
 	var trainingParameters pkg.TrainingParameters
@@ -27,12 +28,13 @@ func TrainCommand() *cobra.Command {
 		Short: "Trains a new model on the provided training data and saves the trained model",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pkg.Train(trainFile, outputFile, targetColumn, modelParameters, trainingParameters)
+			pkg.Train(trainFile, testFile, outputFile, targetColumn, modelParameters, trainingParameters)
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVarP(&trainFile, "train-file", "i", "", "name of train input file")
+	cmd.Flags().StringVarP(&trainFile, "train-file", "i", "", "name of train file")
+	cmd.Flags().StringVarP(&testFile, "test-file", "", "", "name of test file")
 	cmd.Flags().StringVarP(&outputFile, "output-file", "o", "", "name of the file to save model to.")
 	cmd.Flags().IntVarP(&trainingParameters.BatchSize, "batch-size", "b", 16, "batch size")
 	cmd.Flags().Float64VarP(&trainingParameters.LearningRate, "learning-rate", "l", 0.01, "learning rate")
