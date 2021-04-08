@@ -111,7 +111,7 @@ func TestGolem(t *testing.T) {
 			TrainCmdLine:        "train -i datasets/boston_housing/boston-housing-train.csv -o $MODEL -t medv  -n 20 -s 3 --sparsity-loss-weight 0.01",
 			TestCmdLine:         "test -i datasets/boston_housing/boston-housing-test.csv -m $MODEL ",
 			ExpectedTrainOutput: []logExpectation{{key: "epoch", exactValue: 19.0}},
-			ExpectedTestOutput:  []logExpectation{{key: "R-squared", minValue: 0.7, maxValue: 0.75}},
+			ExpectedTestOutput:  []logExpectation{{key: "R-squared", minValue: 0.6, maxValue: 0.75}},
 		},
 	}
 
